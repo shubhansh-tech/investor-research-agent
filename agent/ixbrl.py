@@ -20,16 +20,21 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
-from bs4 import BeautifulSoup, NavigableString, Tag
+import warnings
+
+from bs4 import BeautifulSoup, NavigableString, Tag, XMLParsedAsHTMLWarning
+
+warnings.filterwarnings("ignore", category=XMLParsedAsHTMLWarning)
 
 # Statement headings we track so every fact can be cited to a section.
+_PRE = r"^\s*(unaudited\s+)?(condensed\s+)?(consolidated\s+)?(condensed\s+)?"
 SECTION_PATTERNS = [
-    ("Consolidated Balance Sheets", re.compile(r"(consolidated\s+)?(balance\s+sheets?|statements?\s+of\s+financial\s+(position|condition))", re.I)),
-    ("Consolidated Statements of Operations", re.compile(r"(consolidated\s+)?statements?\s+of\s+(operations|income|earnings)(?!\s+and\s+compreh)", re.I)),
-    ("Consolidated Statements of Comprehensive Income", re.compile(r"statements?\s+of\s+comprehensive\s+(income|loss)", re.I)),
-    ("Consolidated Statements of Shareholders' Equity", re.compile(r"statements?\s+of\s+(changes\s+in\s+)?(shareholders|stockholders)['’]?\s+equity", re.I)),
-    ("Consolidated Statements of Cash Flows", re.compile(r"(consolidated\s+)?statements?\s+of\s+cash\s+flows?", re.I)),
-    ("Notes to Financial Statements", re.compile(r"notes\s+to\s+(the\s+)?(condensed\s+)?(consolidated\s+)?financial\s+statements", re.I)),
+    ("Consolidated Balance Sheets", re.compile(_PRE + r"(balance\s+sheets?|statements?\s+of\s+financial\s+(position|condition))", re.I)),
+    ("Consolidated Statements of Operations", re.compile(_PRE + r"statements?\s+of\s+(operations|income|earnings)(\s+and\s+comprehensive\s+(income|loss))?", re.I)),
+    ("Consolidated Statements of Comprehensive Income", re.compile(_PRE + r"statements?\s+of\s+comprehensive\s+(income|loss)", re.I)),
+    ("Consolidated Statements of Shareholders' Equity", re.compile(_PRE + r"statements?\s+of\s+(changes\s+in\s+)?(shareholders|stockholders)['’]?\s+(equity|deficit)", re.I)),
+    ("Consolidated Statements of Cash Flows", re.compile(_PRE + r"statements?\s+of\s+cash\s+flows?", re.I)),
+    ("Notes to Financial Statements", re.compile(r"^\s*notes\s+to\s+(the\s+)?(unaudited\s+)?(condensed\s+)?(consolidated\s+)?(condensed\s+)?financial\s+statements", re.I)),
 ]
 
 STATEMENT_SECTIONS = {s for s, _ in SECTION_PATTERNS[:5]}
@@ -116,6 +121,9 @@ class Filing:
             if f.section != "Consolidated Statements of Cash Flows" or c.has_dimensions or c.instant:
                 continue
             if c.end == end and c.start == start and f.concept not in seen:
+                if f.concept == "us-gaap:NetCashProvidedByUsedInOperatingActivities" or \
+                        f.concept.startswith("us-gaap:NetCashProvidedByUsedInOperatingActivities"):
+                    break  # operating section ends here; investing/financing lines are not candidates
                 out.append(f)
                 seen.add(f.concept)
         return out
@@ -228,9 +236,9 @@ def parse_filing(path: str | Path) -> Filing:
     for el in soup.descendants:
         if isinstance(el, NavigableString):
             s = str(el).strip()
-            if 8 <= len(s) <= 140:
+            if 8 <= len(s) <= 110:
                 for name, pat in SECTION_PATTERNS:
-                    if pat.search(s) and not re.search(r"\bsee\b|\brefer\b|\bincluded in\b", s, re.I):
+                    if pat.match(s):
                         section = name
                         break
             continue
@@ -249,7 +257,7 @@ def parse_filing(path: str | Path) -> Filing:
 
     def first(name: str) -> str | None:
         v = dei.get(name)
-        return v[0][0] if v else None
+        return re.sub(r"\s+", " ", v[0][0]).strip() if v else None
 
     symbols = sorted({v.upper() for v, _ in dei.get("dei:TradingSymbol", []) if v})
     return Filing(
