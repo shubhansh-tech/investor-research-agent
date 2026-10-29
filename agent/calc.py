@@ -75,7 +75,7 @@ def fmt_money(v: float | None) -> str:
     if v is None:
         return "n/a"
     m = v / 1e6
-    s = f"${abs(m):,.0f}M" if abs(m) >= 10 else f"${abs(m):,.1f}M"
+    s = f"${abs(m):,.0f}M" if abs(m) >= 100 else f"${abs(m):,.1f}M"
     return f"-{s}" if v < 0 else s
 
 
