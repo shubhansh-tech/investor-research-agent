@@ -155,7 +155,7 @@ def _parse_text_date(s: str) -> date | None:
     d = _d(s)
     if d:
         return d
-    m = re.search(r"([A-Za-z]+)\s+(\d{1,2}),?\s+(\d{4})", s or "")
+    m = re.search(r"([A-Za-z]+)\s+(\d{1,2})\s*,?\s*(\d{4})", s or "")
     if m and m[1].lower() in _MONTHS:
         return date(int(m[3]), _MONTHS[m[1].lower()], int(m[2]))
     return None

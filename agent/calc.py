@@ -103,6 +103,8 @@ class Calculator:
     def flow(self, name: str, concepts: list[str], displayed: bool = False) -> Input:
         """TTM value of a flow item, trying concepts in order."""
         t = self.ttm
+        if t.annual is None:
+            return Input(name, None, note=f"{name}: latest 10-K missing")
         val = lambda fact: fact.displayed_value if displayed else fact.value  # noqa: E731
         last_missing = ""
         for c in concepts:
