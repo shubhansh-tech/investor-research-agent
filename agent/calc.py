@@ -13,6 +13,7 @@ If no 10-Q has been filed since the 10-K, TTM = the 10-K year.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from datetime import date
 
@@ -108,22 +109,50 @@ class Calculator:
         val = lambda fact: fact.displayed_value if displayed else fact.value  # noqa: E731
         last_missing = ""
         for c in concepts:
-            a = self._annual(t.annual, c)
-            if a is None:
-                last_missing = f"{name}: {c} not found in 10-K {t.annual.period_end}"
+            filings = [(t.annual, True)] + ([(t.current_q, False), (t.prior_q, False)] if t.current_q else [])
+            facts = [self._annual(f, c) if annual else (self._ytd(f, c) if f else None) for f, annual in filings]
+            # Companies sometimes tag the same printed line differently across filings.
+            # Fall back to the identical row label in the same statement, and say so.
+            label = next((x.label for x in facts if x is not None and x.label), "")
+            section = next((x.section for x in facts if x is not None), "")
+            matched_by_label = []
+            for k, ((f, annual), x) in enumerate(zip(filings, facts)):
+                if x is None and f is not None and label and section.endswith("Cash Flows"):
+                    alt = self._by_label(f, label, annual)
+                    if alt is not None:
+                        facts[k] = alt
+                        matched_by_label.append(f"{f.form} {f.period_end} tags it {alt.concept}")
+            if any(x is None for x in facts) or (t.current_q and t.prior_q is None):
+                miss = next(((f, a) for (f, a), x in zip(filings, facts) if x is None), (t.prior_q, False))
+                where = f"{miss[0].form} {miss[0].period_end}" if miss[0] else "prior-year 10-Q"
+                last_missing = f"{name}: {c} not found in {where}"
                 continue
+            note = ("matched by line label: " + "; ".join(matched_by_label)) if matched_by_label else ""
+            a = facts[0]
             if t.current_q is None:
-                return Input(name, val(a), f"10-K FY {fmt_money(val(a))}", [self.cite(t.annual, a)])
-            cur = self._ytd(t.current_q, c)
-            pri = self._ytd(t.prior_q, c) if t.prior_q else None
-            if cur is None or pri is None:
-                miss = t.current_q if cur is None else t.prior_q
-                last_missing = f"{name}: {c} not found in 10-Q {miss.period_end if miss else 'prior-year'}"
-                continue
+                return Input(name, val(a), f"10-K FY {fmt_money(val(a))}", [self.cite(t.annual, a)], note=note)
+            cur, pri = facts[1], facts[2]
             v = val(a) + val(cur) - val(pri)
             how = f"{fmt_money(val(a))} (10-K FY) + {fmt_money(val(cur))} (YTD {t.current_q.period_end}) - {fmt_money(val(pri))} (YTD {t.prior_q.period_end})"
-            return Input(name, v, how, [self.cite(t.annual, a), self.cite(t.current_q, cur), self.cite(t.prior_q, pri)])
+            if note:
+                how += f" [{note}]"
+            return Input(name, v, how, [self.cite(t.annual, a), self.cite(t.current_q, cur), self.cite(t.prior_q, pri)], note=note)
         return Input(name, None, note=last_missing or f"{name}: not found")
+
+    @staticmethod
+    def _norm(s: str) -> str:
+        return re.sub(r"[^a-z]", "", (s or "").lower())
+
+    def _by_label(self, f: Filing, label: str, annual: bool) -> Fact | None:
+        want = self._norm(label)
+        for x in f.facts:
+            c = x.context
+            if x.section.endswith("Cash Flows") and not c.instant and not c.has_dimensions and c.end == f.period_end \
+                    and self._norm(x.label) == want:
+                days = (c.end - c.start).days
+                if (annual and 330 <= days <= 380) or (not annual and c.start == f.ytd_start()):
+                    return x
+        return None
 
     def equity(self) -> tuple[Input, Input]:
         t = self.ttm
@@ -180,10 +209,12 @@ class Calculator:
         for c in mapping.working_capital:
             parts.append(self.flow(f"Working capital: {c.split(':')[-1]}", [c], displayed=True))
         if "maintenance_capex" in overrides:
-            mc = Input("Maintenance capex (reviewer override)", float(overrides["maintenance_capex"]),
-                       f"{fmt_money(float(overrides['maintenance_capex']))} per Shubhansh's direction",
+            src = overrides.get("maintenance_capex_source", "Reject feedback")
+            mc = Input("Maintenance capex (Shubhansh's assumption)", float(overrides["maintenance_capex"]),
+                       f"{fmt_money(float(overrides['maintenance_capex']))} per Shubhansh ({src})",
                        note="reviewer override")
-            m.assumptions.append("Maintenance capex was used per direction of Shubhansh (Reject feedback).")
+            m.assumptions.append(f"Maintenance capex was used per direction of Shubhansh ({src}), "
+                                 "because the rule 'maintenance capex = depreciation' needs a figure he supplied.")
         else:
             mc = self.flow("Maintenance capex (= depreciation)", [mapping.dep_concept] if mapping.dep_concept else DEP_CONCEPTS)
             m.assumptions.append("Maintenance capex assumed equal to depreciation (research_rules.md).")

@@ -113,6 +113,23 @@ def parse_overrides(feedback: str | None) -> dict:
     return out
 
 
+def read_assumptions(tdir: Path) -> tuple[dict, str | None]:
+    """<TICKER>/assumptions.md is written by Shubhansh (read-only for the agent). It holds
+    standing judgment calls, e.g. a maintenance-capex figure when the company does not
+    disclose depreciation. Line format: 'maintenance_capex_ttm: $150M'."""
+    p = tdir / C.ASSUMPTIONS_FILE
+    if not p.exists():
+        return {}, None
+    text = p.read_text(encoding="utf-8")
+    out = {}
+    m = re.search(r"maintenance_capex_ttm\s*:\s*\$?\s*([\d,.]+)\s*(m|mm|million|b|bn|billion)?", text, re.I)
+    if m:
+        v = float(m[1].replace(",", ""))
+        v *= 1e9 if (m[2] or "m").lower().startswith("b") else 1e6
+        out = {"maintenance_capex": v, "maintenance_capex_source": f"{tdir.name}/{C.ASSUMPTIONS_FILE}"}
+    return out, text[:3000]
+
+
 def preflight(root: Path, ticker: str, test_mode: bool) -> list[str]:
     t = root / ticker
     miss = []
@@ -233,6 +250,7 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     tr(f"News items read: {len(news)}")
 
     base = storage.baseline(ledger / ticker, test_mode)
+    standing, assumptions_text = read_assumptions(tdir)
     thesis_p = tdir / C.THESIS_FILE
     thesis = thesis_p.read_text(encoding="utf-8")[:3000] if thesis_p.exists() else None
     if base:
@@ -266,6 +284,7 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
         "material_events_detected_by_code": row.review_first,
         "baseline": {k: base.get(k) for k in ("date_time", "roe", "owner_earnings_yield", "agent_brief", "shubhansh_brief", "news_labels")} if base else None,
         "thesis_note": thesis,
+        "shubhansh_assumptions": assumptions_text,
         "reviewer_feedback_for_this_rerun": feedback,
     }
     if llm is None:
@@ -316,7 +335,9 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     # ---------------- ACT: calculator
     calc = Calculator(ttm, log_kq + log_8k)
     row.roe = calc.roe()
-    overrides = parse_overrides(feedback)
+    overrides = {**standing, **parse_overrides(feedback)}   # this rerun's feedback wins over the standing file
+    if "maintenance_capex" in parse_overrides(feedback):
+        overrides["maintenance_capex_source"] = "Reject feedback on this rerun"
     row.oey = calc.owner_earnings_yield(mapping, price, overrides)
     tr(f"Calculator: ROE {pct(row.roe.value) if row.roe.value is not None else row.roe.flag}, "
        f"Owner Earnings Yield {pct(row.oey.value) if row.oey.value is not None else row.oey.flag}")

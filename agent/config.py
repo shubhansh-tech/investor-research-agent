@@ -19,6 +19,7 @@ SNAPSHOT_8K = "8-K_EDGAR_filing_list.xlsx"
 NEWS_DIR = "synthetic-news_TEST_only"
 ANALYSIS_FILE = "analysis.xlsx"
 THESIS_FILE = "thesis_note.md"
+ASSUMPTIONS_FILE = "assumptions.md"
 
 # Filings Shubhansh must download himself (PRD Q14 filing rules)
 REQUIRED_FORMS = {"10-K", "10-Q", "10-K/A", "10-Q/A"}
