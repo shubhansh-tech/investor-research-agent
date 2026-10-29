@@ -20,6 +20,10 @@ COLUMNS = [
 ]
 
 
+NUMERIC = {"roe", "ttm_net_income", "average_equity", "owner_earnings_yield", "owner_earnings", "price",
+           "share_count", "market_cap"}
+
+
 def path_for(tdir: Path) -> Path:
     return tdir / C.ANALYSIS_FILE
 
@@ -32,6 +36,8 @@ def read(tdir: Path) -> pd.DataFrame:
     for c in COLUMNS:
         if c not in df.columns:
             df[c] = None
+        if c not in NUMERIC:
+            df[c] = df[c].astype(object)
     return df[COLUMNS]
 
 

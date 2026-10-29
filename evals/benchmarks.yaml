@@ -1,0 +1,21 @@
+# Shubhansh's MANUAL calculations, done by hand before the agent is trusted (PRD Q09/Q20).
+# Values are ratios (0.184 = 18.4%) at the price in cases.yaml. Tolerance = rounding.
+# CB and QUBT: fill in after the manual calculation. TSLA is held out: calculate by hand,
+# then run the agent on it ONCE after the pass mark is met, with no tuning.
+EXMP:            # fictional test company; values follow from tools/make_exmp_fixture.py
+  roe: 0.18370
+  oey: 0.04096
+  tolerance: 0.0005
+CB:
+  roe: null
+  oey: null
+  tolerance: 0.001
+  manual_minutes: null
+QUBT:
+  roe: null
+  oey: null
+  tolerance: 0.001
+TSLA:
+  roe: null
+  oey: null
+  manual_minutes: null

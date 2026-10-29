@@ -142,8 +142,9 @@ def preflight(root: Path, ticker: str, test_mode: bool) -> list[str]:
 
 def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEFAULT_DATA_ROOT, *,
                  test_mode: bool = True, as_of: date | None = None, feedback: str | None = None,
-                 llm=None, save: bool = True) -> ReviewRow:
+                 llm=None, save: bool = True, ledger_root: Path | str | None = None) -> ReviewRow:
     root = Path(data_root)
+    ledger = Path(ledger_root) if ledger_root else root   # where analysis.xlsx lives
     ticker = (ticker or "").strip().upper()
     as_of = as_of or date.today()
     row = ReviewRow(uuid.uuid4().hex[:10], ticker, f"{as_of.isoformat()} {datetime.now().strftime('%H:%M')} ET", test_mode, price=price)
@@ -152,7 +153,7 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     def finish(save_row: bool = True) -> ReviewRow:
         row.finalize_status()
         if save and save_row and (root / ticker).is_dir():
-            storage.append(root / ticker, row.to_record())
+            storage.append(ledger / ticker, row.to_record())
         return row
 
     # ---------------- OBSERVE: inputs and preflight
@@ -231,7 +232,7 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
             row.embedded_instructions.append({"id": n.id, "quote": inj, "by": "code detector"})
     tr(f"News items read: {len(news)}")
 
-    base = storage.baseline(tdir, test_mode)
+    base = storage.baseline(ledger / ticker, test_mode)
     thesis_p = tdir / C.THESIS_FILE
     thesis = thesis_p.read_text(encoding="utf-8")[:3000] if thesis_p.exists() else None
     if base:
