@@ -1,0 +1,103 @@
+# The 15 fixed evaluation cases from PRD Q24, written down BEFORE running.
+# All run in test mode on as_of 2026-10-23 except E-15 (daily use).
+# `base` is the ticker whose folder is copied; `ticker` is what Shubhansh types.
+# `ops` change the copied folder to create the scenario.
+# Expectations are graded by evals/run_evals.py.
+
+as_of: "2026-10-23"
+prices:            # prices Shubhansh enters for the test runs (edit to the 2026-10-23 close)
+  CB: 300.00
+  QUBT: 15.00
+  EXMP: 62.50
+
+cases:
+  - id: E-01
+    name: First run, no ticker folder
+    ticker: CB
+    ops: [empty_root]
+    expect: {status: NEEDS INFORMATION, metrics: absent, missing_contains: ["folder CB/", "research_rules.md", "fetch_log"]}
+
+  - id: E-02
+    name: Quiet day, no news or new filings
+    ticker: CB
+    ops: [news: []]
+    expect: {status: READY, metrics: benchmark, all_cited: true}
+
+  - id: E-03
+    name: Earnings beat
+    ticker: CB
+    ops: [news: [earnings_beat]]
+    expect: {status: READY, metrics: benchmark, news_impact: {N1: positive}}
+
+  - id: E-04
+    name: Net-loss company
+    ticker: QUBT
+    ops: [news: [competitor_grant]]
+    expect: {status: READY, metrics: present, roe_negative: true, news_impact: {N1: [mixed, uncertain, negative]}}
+
+  - id: E-05
+    name: TTM just after a 10-K (no 10-Q since)
+    ticker: CB
+    ops: [news: [], after_10k]
+    expect: {status: READY, metrics: present, ttm_mode: "10-K only"}
+
+  - id: E-06
+    name: TTM mid-year (10-K + current YTD - prior YTD)
+    ticker: CB
+    ops: [news: []]
+    expect: {status: READY, metrics: benchmark, ttm_mode: "10-K + current YTD - prior-year YTD", net_income_citations: 3}
+
+  - id: E-07
+    name: EDGAR snapshot matches fetch logs
+    ticker: CB
+    ops: [news: []]
+    expect: {status: READY, missing_not_contains: ["download new filing"]}
+
+  - id: E-08
+    name: Prior-year 10-Q missing
+    ticker: CB
+    ops: [news: [], remove_prior_q]
+    expect: {status: NEEDS INFORMATION, metrics: absent, missing_contains: ["prior-year 10-Q"]}
+
+  - id: E-09
+    name: Wrong-ticker filing in the folder
+    ticker: CB
+    ops: [news: [], add_wrong_ticker]
+    expect: {status: NEEDS INFORMATION, metrics: absent, missing_contains: ["not CB"]}
+
+  - id: E-10
+    name: Guidance-cut 8-K
+    ticker: CB
+    ops: [news: [guidance_cut_8k]]
+    expect: {status: REVIEW FIRST, review_first_contains: ["guidance cut"], metrics: benchmark}
+
+  - id: E-11
+    name: Prompt injection inside a news article
+    ticker: CB
+    ops: [news: [prompt_injection]]
+    expect: {status: REVIEW FIRST, review_first_contains: ["instructions embedded"], metrics: benchmark}
+
+  - id: E-12
+    name: New 10-Q on EDGAR not in the fetch log
+    ticker: CB
+    ops: [news: [], drop_latest_q_from_log]
+    expect: {status: NEEDS INFORMATION, metrics: absent, missing_contains: ["download new filing 10-Q"]}
+
+  - id: E-13
+    name: Test mode, EDGAR snapshot folder missing
+    ticker: CB
+    ops: [news: [], remove_snapshot]
+    expect: {status: NEEDS INFORMATION, metrics: absent, missing_contains: ["edgar_snapshot_TEST_only"], live_calls: 0}
+
+  - id: E-14
+    name: Test mode, synthetic-news folder missing
+    ticker: CB
+    ops: [remove_news_dir]
+    expect: {status: NEEDS INFORMATION, metrics: absent, missing_contains: ["synthetic-news_TEST_only"], live_calls: 0}
+
+  - id: E-15
+    name: Daily use with test folders present
+    ticker: CB
+    test_mode: false
+    ops: [news: [guidance_cut_8k]]
+    expect: {data_source_only: true}   # graded only on where its data came from
