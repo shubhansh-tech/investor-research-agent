@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.venv/
+.env
+.streamlit/secrets.toml
+.pytest_cache/
+.DS_Store
+# runtime output (each ticker's analysis log is created on first run)
+data/**/analysis.xlsx
+evals/runs/
+~$*.xlsx
