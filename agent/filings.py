@@ -75,7 +75,12 @@ def accession_from(url: str, given: str | None) -> str:
 
 def read_filing_list(path: Path) -> list[FilingRow]:
     """Read a fetch log or an EDGAR filing-list export (.xlsx or .csv)."""
-    df = pd.read_excel(path) if path.suffix.lower() in {".xlsx", ".xls"} else pd.read_csv(path)
+    raw = pd.read_excel(path, header=None) if path.suffix.lower() in {".xlsx", ".xls"} else pd.read_csv(path, header=None)
+    # EDGAR's export puts title rows ("EDGAR Entity Landing Page", "CIK: ...") above the header.
+    hdr = next((i for i, r in raw.iterrows()
+                if any(re.sub(r"[^a-z]", "", str(v).lower()) in {"formtype", "form"} for v in r.values)), 0)
+    df = raw.iloc[hdr + 1:].copy()
+    df.columns = [str(v) for v in raw.iloc[hdr].values]
     cols = {re.sub(r"[^a-z]", "", str(c).lower()): c for c in df.columns}
 
     def col(*names):
@@ -90,6 +95,8 @@ def read_filing_list(path: Path) -> list[FilingRow]:
     out = []
     for _, r in df.iterrows():
         url = str(r[c_url]) if c_url and pd.notna(r[c_url]) else ""
+        if not c_form or pd.isna(r[c_form]) or (c_fd and _to_date(r[c_fd]) is None):
+            continue  # footer rows such as the landing-page link
         out.append(FilingRow(
             form=str(r[c_form]).strip() if c_form else "",
             description=str(r[c_desc]) if c_desc and pd.notna(r[c_desc]) else "",

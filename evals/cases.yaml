@@ -5,9 +5,9 @@
 # Expectations are graded by evals/run_evals.py.
 
 as_of: "2026-10-23"
-prices:            # prices Shubhansh enters for the test runs (edit to the 2026-10-23 close)
-  CB: 300.00
-  QUBT: 15.00
+prices:            # closing prices on 2026-10-23, entered by Shubhansh
+  CB: 357.37
+  QUBT: 6.52
   EXMP: 62.50
 
 cases:

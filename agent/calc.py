@@ -137,6 +137,9 @@ class Calculator:
             if note:
                 how += f" [{note}]"
             return Input(name, v, how, [self.cite(t.annual, a), self.cite(t.current_q, cur), self.cite(t.prior_q, pri)], note=note)
+        if len(concepts) > 1:
+            tried = ", ".join(c.split(":")[-1] for c in concepts)
+            return Input(name, None, note=f"{name}: not disclosed in the filings used (looked for {tried})")
         return Input(name, None, note=last_missing or f"{name}: not found")
 
     @staticmethod
