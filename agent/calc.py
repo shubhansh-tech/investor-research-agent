@@ -122,25 +122,47 @@ class Calculator:
                     if alt is not None:
                         facts[k] = alt
                         matched_by_label.append(f"{f.form} {f.period_end} tags it {alt.concept}")
-            if any(x is None for x in facts) or (t.current_q and t.prior_q is None):
+            # A cash-flow line the company does not present at all in a filing's cash-flow
+            # statement is nil for that period (accounting convention). Narrow on purpose:
+            # if the line appears anywhere in that statement but not for the needed period,
+            # it is still treated as missing.
+            not_presented = []
+            if section.endswith("Cash Flows"):
+                for k, ((f, annual), x) in enumerate(zip(filings, facts)):
+                    if x is None and f is not None and not self._presented(f, c, label):
+                        facts[k] = 0.0
+                        not_presented.append(f"{f.form} {f.period_end}")
+            if any(x is None for x in facts) or (t.current_q and t.prior_q is None) or all(x == 0.0 for x in facts):
                 miss = next(((f, a) for (f, a), x in zip(filings, facts) if x is None), (t.prior_q, False))
                 where = f"{miss[0].form} {miss[0].period_end}" if miss[0] else "prior-year 10-Q"
                 last_missing = f"{name}: {c} not found in {where}"
                 continue
-            note = ("matched by line label: " + "; ".join(matched_by_label)) if matched_by_label else ""
+            notes = []
+            if matched_by_label:
+                notes.append("matched by line label: " + "; ".join(matched_by_label))
+            if not_presented:
+                notes.append("line not presented in the cash-flow statement of " + ", ".join(not_presented) + "; treated as $0")
+            note = "; ".join(notes)
+            v_of = lambda x: 0.0 if x == 0.0 and not isinstance(x, Fact) else val(x)  # noqa: E731
+            cites = [self.cite(f, x) for (f, _), x in zip(filings, facts) if isinstance(x, Fact)]
             a = facts[0]
             if t.current_q is None:
-                return Input(name, val(a), f"10-K FY {fmt_money(val(a))}", [self.cite(t.annual, a)], note=note)
+                return Input(name, v_of(a), f"10-K FY {fmt_money(v_of(a))}", cites, note=note)
             cur, pri = facts[1], facts[2]
-            v = val(a) + val(cur) - val(pri)
-            how = f"{fmt_money(val(a))} (10-K FY) + {fmt_money(val(cur))} (YTD {t.current_q.period_end}) - {fmt_money(val(pri))} (YTD {t.prior_q.period_end})"
+            v = v_of(a) + v_of(cur) - v_of(pri)
+            how = f"{fmt_money(v_of(a))} (10-K FY) + {fmt_money(v_of(cur))} (YTD {t.current_q.period_end}) - {fmt_money(v_of(pri))} (YTD {t.prior_q.period_end})"
             if note:
                 how += f" [{note}]"
-            return Input(name, v, how, [self.cite(t.annual, a), self.cite(t.current_q, cur), self.cite(t.prior_q, pri)], note=note)
+            return Input(name, v, how, cites, note=note)
         if len(concepts) > 1:
             tried = ", ".join(c.split(":")[-1] for c in concepts)
             return Input(name, None, note=f"{name}: not disclosed in the filings used (looked for {tried})")
         return Input(name, None, note=last_missing or f"{name}: not found")
+
+    def _presented(self, f: Filing, concept: str, label: str) -> bool:
+        want = self._norm(label)
+        return any(x.section.endswith("Cash Flows") and (x.concept == concept or (want and self._norm(x.label) == want))
+                   for x in f.facts)
 
     @staticmethod
     def _norm(s: str) -> str:
@@ -222,6 +244,9 @@ class Calculator:
             mc = self.flow("Maintenance capex (= depreciation)", [mapping.dep_concept] if mapping.dep_concept else DEP_CONCEPTS)
             m.assumptions.append("Maintenance capex assumed equal to depreciation (research_rules.md).")
         m.inputs = parts + [mc]
+        for i in parts:
+            if "treated as $0" in (i.note or ""):
+                m.assumptions.append(f"{i.name}: {i.note.split('; ')[-1]} (research_rules.md).")
         m.missing = [i.note for i in m.inputs if i.value is None]
 
         newest = max(self.ttm.used(), key=lambda f: f.period_end)
