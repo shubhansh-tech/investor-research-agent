@@ -28,7 +28,7 @@ from evals.scenarios import build as build_scenario
 st.set_page_config(page_title="Pre-market Research Agent", page_icon="📈", layout="wide")
 
 # ---- secrets -> environment (never hard-coded)
-for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "SEC_USER_AGENT"):
+for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "SEC_USER_AGENT", "APP_PASSCODE", "MAX_MODEL_CALLS_PER_SESSION"):
     try:
         if k in st.secrets and not os.getenv(k):
             os.environ[k] = str(st.secrets[k])
@@ -68,16 +68,55 @@ with st.sidebar:
         if pick != labels[0]:
             scenario = next(c for c in SPEC["cases"] if pick.startswith(c["id"]))
         st.caption(f"Evaluation date fixed at {TEST_AS_OF}.")
+    # ---- cost guard: the real model runs only for someone who knows the owner's passcode
     has_key = bool(os.getenv("ANTHROPIC_API_KEY"))
-    use_mock = st.checkbox("Offline mock model (no AI)", value=not has_key, disabled=not has_key and True,
-                           help="Deterministic stand-in for testing the screen without an API key.")
+    passcode = os.getenv("APP_PASSCODE", "")
+    unlocked = False
+    if has_key:
+        entered = st.text_input("Owner passcode (enables the real AI model)", type="password",
+                                help="Visitors can use the app with the offline mock model and see saved scorecards. "
+                                     "Real AI calls are billed to the owner, so they need the passcode.")
+        unlocked = bool(passcode) and entered == passcode
+        if entered and not unlocked:
+            st.error("Wrong passcode. Using the offline mock model.")
+    if not unlocked:
+        use_mock = True
+        st.info("Demo mode: offline mock model (no AI calls, no cost).")
+    else:
+        use_mock = st.checkbox("Offline mock model (no AI)", value=False,
+                               help="Deterministic stand-in for testing the screen without spending credit.")
+    cap = int(os.getenv("MAX_MODEL_CALLS_PER_SESSION", "120"))
+    st.session_state.setdefault("model_calls", 0)
+    if unlocked:
+        st.caption(f"Real-model runs this session: {st.session_state.model_calls} of {cap}")
     st.divider()
     st.caption("Research only. No trade, order, brokerage or messaging tool exists in this app.")
 
 
+class _CountingLLM:
+    """Wraps the real model so every call counts toward the per-session cap."""
+
+    def __init__(self, inner):
+        self.inner, self.model, self.name = inner, getattr(inner, "model", ""), getattr(inner, "name", "")
+
+    def _tick(self):
+        if st.session_state.model_calls >= cap:
+            raise LLMError(f"per-session limit of {cap} real-model calls reached")
+        st.session_state.model_calls += 1
+
+    def complete_json(self, *a, **k):
+        self._tick()
+        return self.inner.complete_json(*a, **k)
+
+    def complete_text(self, *a, **k):
+        self._tick()
+        return self.inner.complete_text(*a, **k)
+
+
 def llm_or_none():
     try:
-        return get_llm(use_mock=use_mock)
+        llm = get_llm(use_mock=use_mock)
+        return llm if use_mock else _CountingLLM(llm)
     except LLMError as e:
         st.sidebar.error(str(e))
         return None
