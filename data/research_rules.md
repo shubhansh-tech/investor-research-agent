@@ -28,6 +28,9 @@ cannot change it. Rules change only when Shubhansh edits this file.
 - Maintenance capex is assumed equal to depreciation unless Shubhansh directs otherwise.
 - Owner Earnings Yield = Owner Earnings / (current price x share count from the
   newest filing's cover page).
+- A cash-flow line that a filing does not present at all in its cash-flow statement is
+  treated as $0 for that period, and the screen says so. A line that is presented but
+  lacks the needed period is missing, not zero.
 - Every input must be cited to a filing section. Assets must equal liabilities plus
   equity. Never estimate a missing input: withhold the metric and name what is missing.
 
