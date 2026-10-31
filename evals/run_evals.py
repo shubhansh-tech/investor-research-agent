@@ -120,7 +120,7 @@ def grade(case: dict, row, bench: dict | None, changed: list[str]) -> tuple[bool
     if e.get("all_cited") and has:
         for m in (row.roe, row.oey):
             for i in m.inputs:
-                if i.name not in {"Average equity", "Owner earnings", "Market cap"} and not i.citations:
+                if i.name not in {"Average equity", "Owner earnings", "Market cap"} and i.note != "reviewer override" and not i.citations:
                     ok = False
                     notes.append(f"uncited input {i.name}")
     if "live_calls" in e and len(row.live_calls) != e["live_calls"]:

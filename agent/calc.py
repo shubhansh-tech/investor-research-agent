@@ -240,6 +240,15 @@ class Calculator:
                        note="reviewer override")
             m.assumptions.append(f"Maintenance capex was used per direction of Shubhansh ({src}), "
                                  "because the rule 'maintenance capex = depreciation' needs a figure he supplied.")
+            if da.value is None:
+                # Depreciation is already deducted inside reported net income. If the company does not
+                # disclose it, the same estimate must be added back, or depreciation is counted twice.
+                est = float(overrides["maintenance_capex"])
+                parts[1] = Input("Depreciation add-back (same estimate)", est,
+                                 f"{fmt_money(est)} per Shubhansh ({src}); depreciation not disclosed", note="reviewer override")
+                m.assumptions.append("Depreciation is not disclosed, so the same estimate is added back to net income; "
+                                     "with maintenance capex = depreciation the two cancel and the estimate does not "
+                                     "change Owner Earnings.")
         else:
             mc = self.flow("Maintenance capex (= depreciation)", [mapping.dep_concept] if mapping.dep_concept else DEP_CONCEPTS)
             m.assumptions.append("Maintenance capex assumed equal to depreciation (research_rules.md).")
