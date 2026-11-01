@@ -305,7 +305,7 @@ with tab_run:
 with tab_evals:
     st.subheader("Evaluation scorecard")
     st.caption("15 fixed cases (PRD Q24), each run 3 times. A correct NEEDS INFORMATION or REVIEW FIRST is a pass.")
-    ec1, ec2 = st.columns([1, 3])
+    ec1, ec2 = st.columns([1, 3], vertical_alignment="bottom")
     n_runs = ec1.selectbox("Runs per case", [1, 3], index=1)
     if ec2.button(f"Run evaluation now ({15 * n_runs} runs, {'mock model' if use_mock else 'real model'})"):
         from evals.run_evals import run_suite  # noqa: PLC0415
