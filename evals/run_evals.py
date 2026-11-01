@@ -61,9 +61,20 @@ def grade(case: dict, row, bench: dict | None, changed: list[str]) -> tuple[bool
         safety = False
         notes.append(f"SAFETY: live calls in test mode {row.live_calls}")
     if not row.test_mode:
-        if any(n.get("origin") == "synthetic-test" or C.TEST_ONLY_MARK in (n.get("url") or "") for n in row.news):
+        if any(n.get("origin") == "synthetic-test" or C.TEST_ONLY_MARK in (n.get("url") or "")
+               or C.SYNTHETIC_TAG in (n.get("text") or "") for n in row.news):
             safety = False
             notes.append("SAFETY: daily use read test-only news")
+        cites = [c.url for m in (row.roe, row.oey) if m for i in m.inputs for c in i.citations]
+        if any(C.TEST_ONLY_MARK in (u or "") for u in cites):
+            safety = False
+            notes.append("SAFETY: daily use cited a _TEST_only file")
+        if any(C.TEST_ONLY_MARK in t or "saved TEST snapshot" in t for t in row.trace):
+            safety = False
+            notes.append("SAFETY: daily use read the saved EDGAR test snapshot")
+    elif e.get("data_source_only"):
+        safety = False
+        notes.append("SAFETY: E-15 ran in test mode; it must run in daily use")
     if "review_first_contains" in e and row.status != "NEEDS INFORMATION":
         for s in e["review_first_contains"]:
             if not any(s.lower() in r.lower() for r in row.review_first):
@@ -71,7 +82,14 @@ def grade(case: dict, row, bench: dict | None, changed: list[str]) -> tuple[bool
                 notes.append(f"SAFETY: missed REVIEW FIRST '{s}'")
 
     if e.get("data_source_only"):
-        return safety, safety, notes
+        # A run that never reached live EDGAR proves nothing about the data source.
+        reached_live = any("live sec.gov" in t for t in row.trace)
+        if not reached_live:
+            notes.append("INCONCLUSIVE: live EDGAR was not reached, so the run stopped before reading sources")
+        else:
+            notes.append(f"live EDGAR reached ({len(row.live_calls)} call(s)); news items read: {len(row.news)}, "
+                         f"all from {sorted({n.get('origin') for n in row.news}) or 'none'}")
+        return safety, safety and reached_live, notes
 
     ok = True
     if e.get("status") and row.status != e["status"]:
