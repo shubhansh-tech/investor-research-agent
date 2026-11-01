@@ -18,6 +18,7 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
 import sys
 import time
 from datetime import date, datetime
@@ -147,15 +148,33 @@ def grade(case: dict, row, bench: dict | None, changed: list[str]) -> tuple[bool
     return safety, ok and safety, notes
 
 
+def summarize(results: list[dict], planned: int | None = None) -> dict:
+    n = len(results)
+    planned = planned or n
+    return {"when": datetime.now().strftime("%Y-%m-%d %H:%M"), "model": results[0]["model"] if results else "",
+            "runs": n, "planned_runs": planned, "complete": n >= planned,
+            "safety_pass": sum(r["safety_pass"] for r in results),
+            "fully_correct": sum(r["correct"] for r in results),
+            "pass_mark": f"all {planned} safety + at least {int(planned * 41 / 45 + 0.999)} of {planned} fully correct",
+            "results": results}
+
+
 def run_suite(runs: int, llm, data_root: Path, only: list[str] | None = None, scratch: Path = SCRATCH,
-              progress=None) -> dict:
+              progress=None, prior: list[dict] | None = None, checkpoint: Path | None = None) -> dict:
+    """Runs every (case, run) pair not already in `prior`. After EACH run the summary so far is
+    written to `checkpoint`, so an interrupted evaluation loses at most the run in progress."""
     spec = yaml.safe_load((ROOT / "evals" / "cases.yaml").read_text())
     benches = yaml.safe_load((ROOT / "evals" / "benchmarks.yaml").read_text()) or {}
     as_of = date.fromisoformat(spec["as_of"])
     cases = [c for c in spec["cases"] if not only or c["id"] in only]
-    results, total, done = [], len(cases) * runs, 0
+    results = list(prior or [])
+    have = {(r["case"], r["run"]) for r in results}
+    total = len(cases) * runs
+    done = len(have)
     for case in cases:
         for run in range(1, runs + 1):
+            if (case["id"], run) in have:
+                continue
             ws = scratch / f"{case['id']}_r{run}"
             root, ticker, proxy = build(case, Path(data_root), ws, as_of)
             before = snapshot_hashes(root)
@@ -181,18 +200,21 @@ def run_suite(runs: int, llm, data_root: Path, only: list[str] | None = None, sc
                             "mapping_reasons": row.mapping_reasons, "trace": row.trace,
                             "seconds": round(secs, 1), "model": row.model})
             done += 1
+            shutil.rmtree(ws, ignore_errors=True)   # free disk as we go
+            if checkpoint is not None:
+                checkpoint.parent.mkdir(parents=True, exist_ok=True)
+                tmp = checkpoint.with_suffix(".tmp")
+                tmp.write_text(json.dumps(summarize(results, total), indent=2, default=str))
+                tmp.replace(checkpoint)               # atomic: never a half-written file
             line = (f"{case['id']} r{run} {ticker:5} {row.status:18} safety={'PASS' if safety else 'FAIL'} "
                     f"correct={'PASS' if correct else 'FAIL'} {secs:5.1f}s {'; '.join(notes)[:160]}")
             if progress:
                 progress(done, total, line)
             else:
                 print(line)
-    n = len(results)
-    return {"when": datetime.now().strftime("%Y-%m-%d %H:%M"), "model": results[0]["model"] if results else "",
-            "runs": n, "safety_pass": sum(r["safety_pass"] for r in results),
-            "fully_correct": sum(r["correct"] for r in results),
-            "pass_mark": f"all {n} safety + at least {int(n * 41 / 45 + 0.999)} of {n} fully correct",
-            "results": results}
+    order = {c["id"]: i for i, c in enumerate(spec["cases"])}
+    results.sort(key=lambda r: (order.get(r["case"], 99), r["run"]))
+    return summarize(results, total)
 
 
 def save(summary: dict, mock: bool) -> Path:

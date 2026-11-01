@@ -305,9 +305,18 @@ with tab_run:
 with tab_evals:
     st.subheader("Evaluation scorecard")
     st.caption("15 fixed cases (PRD Q24), each run 3 times. A correct NEEDS INFORMATION or REVIEW FIRST is a pass.")
-    ec1, ec2 = st.columns([1, 3], vertical_alignment="bottom")
+    # The checkpoint lives on the app's server, outside the browser session, so it survives a page
+    # reload or dropped connection (not an app restart). Real-model and mock runs are kept apart.
+    ckpt_dir = Path(tempfile.gettempdir()) / "ira_eval_checkpoints"
+    ckpt = ckpt_dir / ("latest-mock.json" if use_mock else "latest-model.json")
+    prior_data = json.loads(ckpt.read_text()) if ckpt.exists() else None
+    ec1, ec2, ec3 = st.columns([1, 2, 2], vertical_alignment="bottom")
     n_runs = ec1.selectbox("Runs per case", [1, 3], index=1)
-    if ec2.button(f"Run evaluation now ({15 * n_runs} runs, {'mock model' if use_mock else 'real model'})"):
+    start_new = ec2.button(f"Run evaluation now ({15 * n_runs} runs, {'mock model' if use_mock else 'real model'})")
+    can_resume = bool(prior_data) and not prior_data.get("complete") and prior_data.get("planned_runs") == 15 * n_runs
+    resume = ec3.button(f"Resume ({prior_data['runs'] if prior_data else 0} of {15 * n_runs} done)", disabled=not can_resume,
+                        help="Continues an interrupted evaluation from the last saved run.")
+    if start_new or resume:
         from evals.run_evals import run_suite  # noqa: PLC0415
         llm = llm_or_none()
         bar, log = st.progress(0.0), st.empty()
@@ -318,15 +327,21 @@ with tab_evals:
             bar.progress(done / total)
             log.code("\n".join(lines[-15:]), language=None)
 
-        st.session_state.eval_summary = run_suite(n_runs, llm, WS / "data", scratch=WS / "evals", progress=prog)
+        st.session_state.eval_summary = run_suite(
+            n_runs, llm, WS / "data", scratch=WS / "evals", progress=prog,
+            prior=prior_data["results"] if resume else None, checkpoint=ckpt)
+        prior_data = st.session_state.eval_summary
     res_dir = C.REPO_ROOT / "evals" / "results"
     files = sorted(res_dir.glob("latest-*.json")) if res_dir.exists() else []
-    shown = [("This session", st.session_state.eval_summary)] if st.session_state.get("eval_summary") else []
+    shown = []
+    if prior_data:
+        shown.append(("Latest run on this server" + ("" if prior_data.get("complete") else " (partial, saved after each run)"),
+                      prior_data))
     shown += [(f.stem, json.loads(f.read_text())) for f in files]
     if not shown:
         st.info("No scorecard yet.")
     for title, data in shown:
-        if title == "This session":
+        if title.startswith("Latest run on this server"):
             st.download_button("Download this scorecard (JSON)", json.dumps(data, indent=2, default=str),
                                file_name=f"scorecard-{data['when'].replace(' ', '-').replace(':', '')}.json")
         n = data["runs"]

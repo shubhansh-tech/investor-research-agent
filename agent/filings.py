@@ -7,6 +7,8 @@ of being wrong.
 """
 from __future__ import annotations
 
+import dataclasses
+import hashlib
 import json
 import re
 import urllib.request
@@ -193,13 +195,31 @@ class TTMSet:
         return [f for f in (self.annual, self.current_q, self.prior_q) if f is not None]
 
 
+_PARSE_CACHE: dict[tuple[str, str], Filing] = {}
+_PARSE_CACHE_MAX = 16
+
+
+def parse_filing_cached(p: Path) -> Filing:
+    """Parse each distinct filing once per process. The key is the file's name plus a hash of its
+    bytes, so an edited or different file is always re-read. A copy with THIS file's path is
+    returned, so code that later deletes or cites f.path acts on the right file."""
+    key = (p.name, hashlib.sha1(p.read_bytes()).hexdigest())
+    f = _PARSE_CACHE.get(key)
+    if f is None:
+        f = parse_filing(p)
+        if len(_PARSE_CACHE) >= _PARSE_CACHE_MAX:
+            _PARSE_CACHE.pop(next(iter(_PARSE_CACHE)))
+        _PARSE_CACHE[key] = f
+    return dataclasses.replace(f, path=p)
+
+
 def load_filings(tdir: Path) -> tuple[list[Filing], list[str]]:
     files, errors = [], []
     for p in sorted((tdir / "filings").glob("*")):
         if p.suffix.lower() not in {".htm", ".html", ".xhtml"}:
             continue
         try:
-            f = parse_filing(p)
+            f = parse_filing_cached(p)
             if not f.form or not f.period_end:
                 errors.append(f"{p.name}: not an inline-XBRL 10-K/10-Q (no document type or period found)")
                 continue

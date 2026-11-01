@@ -12,5 +12,10 @@ App: https://investor-research-agent.streamlit.app
    failed"), stop and send a screenshot rather than burning through all 45.
 4. **When it finishes,** click **Download this scorecard (JSON)** and upload it to the chat.
 
+**If it stops part-way:** results are saved on the server after every run. Reload the page,
+enter the passcode, open the Evals tab, keep Runs per case = 3, and click **Resume (N of 45 done)**.
+The partial scorecard is also downloadable at any time. (An app restart, e.g. after a code push,
+does wipe the server checkpoint, so no pushes during a run.)
+
 **Cost check:** at most 2 model calls per run (one retry allowed), so 45 runs use at most 90 of
 the 120-call session cap.
