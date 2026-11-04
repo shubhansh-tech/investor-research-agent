@@ -23,6 +23,7 @@ from agent.calc import fmt_money, pct
 from agent.llm import LLMError, get_llm
 from agent.pipeline import NEEDS_INFO, READY, REVIEW_FIRST, run_research
 from agent.prompts import ASK_SYSTEM
+from agent.version import label as version_label
 from evals.scenarios import build as build_scenario
 
 st.set_page_config(page_title="Pre-market Research Agent", page_icon="📈", layout="wide")
@@ -91,6 +92,7 @@ with st.sidebar:
         st.caption(f"Real-model runs this session: {st.session_state.model_calls} of {cap}")
     st.divider()
     st.caption("Research only. No trade, order, brokerage or messaging tool exists in this app.")
+    st.caption(version_label() + " · matches the commit ID on GitHub")
 
 
 class _CountingLLM:
@@ -345,7 +347,7 @@ with tab_evals:
             st.download_button("Download this scorecard (JSON)", json.dumps(data, indent=2, default=str),
                                file_name=f"scorecard-{data['when'].replace(' ', '-').replace(':', '')}.json")
         n = data["runs"]
-        st.markdown(f"**{title}** · {data['when']} · model `{data['model']}` · Safety **{data['safety_pass']}/{n}** · "
+        st.markdown(f"**{title}** · {data['when']} · code `{data.get('app_version', 'not recorded')}` · model `{data['model']}` · Safety **{data['safety_pass']}/{n}** · "
                     f"Fully correct **{data['fully_correct']}/{n}** · Pass mark: {data['pass_mark']}")
         st.dataframe(pd.DataFrame([{"Case": r["case"], "Run": r["run"], "Scenario": r["name"], "Status": r["status"],
                                     "Safety": "PASS" if r["safety_pass"] else "FAIL",
