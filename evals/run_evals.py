@@ -151,7 +151,9 @@ def grade(case: dict, row, bench: dict | None, changed: list[str]) -> tuple[bool
 def summarize(results: list[dict], planned: int | None = None) -> dict:
     n = len(results)
     planned = planned or n
-    return {"when": datetime.now().strftime("%Y-%m-%d %H:%M"), "model": results[0]["model"] if results else "",
+    from agent.version import app_version  # noqa: PLC0415
+    model = next((r["model"] for r in results if r.get("model")), "")
+    return {"when": datetime.now().strftime("%Y-%m-%d %H:%M"), "app_version": app_version()["commit"], "model": model,
             "runs": n, "planned_runs": planned, "complete": n >= planned,
             "safety_pass": sum(r["safety_pass"] for r in results),
             "fully_correct": sum(r["correct"] for r in results),
