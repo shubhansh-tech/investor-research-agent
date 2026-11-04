@@ -295,7 +295,8 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     for attempt in (1, 2):
         try:
             out = llm.complete_json(SYSTEM, build_user_prompt(ctx, errs if attempt == 2 else None))
-            errs = check_model_output(out, set(cash_cands), set(dep_cands), {n.id for n in news})
+            errs = check_model_output(out, set(cash_cands), set(dep_cands), {n.id for n in news},
+                                      injected=[e["quote"] for e in row.embedded_instructions])
         except Exception as e:  # noqa: BLE001
             errs = [f"model call or JSON parsing failed: {e}"]
         tr(f"Model attempt {attempt}: {'passed checks' if not errs else 'failed: ' + '; '.join(errs)[:300]}")
