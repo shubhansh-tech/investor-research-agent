@@ -110,11 +110,33 @@ class Calculator:
         last_missing = ""
         for c in concepts:
             filings = [(t.annual, True)] + ([(t.current_q, False), (t.prior_q, False)] if t.current_q else [])
-            facts = [self._annual(f, c) if annual else (self._ytd(f, c) if f else None) for f, annual in filings]
+            if displayed:
+                # Cash-flow adjustments: a line can appear on the income statement AND the cash-flow
+                # statement with opposite signs (a realized gain is +income but a -adjustment).
+                # Owner-earnings add-backs must use the cash-flow statement's version.
+                facts = [self._cf_fact(f, c, annual) if f else None for f, annual in filings]
+            else:
+                facts = [self._annual(f, c) if annual else (self._ytd(f, c) if f else None) for f, annual in filings]
             # Companies sometimes tag the same printed line differently across filings.
             # Fall back to the identical row label in the same statement, and say so.
             label = next((x.label for x in facts if x is not None and x.label), "")
             section = next((x.section for x in facts if x is not None), "")
+            sources = [f for f, _ in filings]          # which filing each fact is cited to
+            # The current 10-Q prints last year's same period as a comparison column. When the
+            # prior-year 10-Q lacks the line, that column is the company's own (and most recent)
+            # figure for the period, so use it and cite the current 10-Q.
+            comparative = ""
+            if t.current_q is not None and t.prior_q is not None and facts[2] is None:
+                comp = None
+                if displayed:
+                    comp = next((x for x in t.current_q.total_facts(c) if x.section.endswith("Cash Flows")
+                                 and not x.context.instant and x.context.end == t.prior_q.period_end
+                                 and x.context.start == t.prior_q.ytd_start()), None)
+                comp = comp or t.current_q.duration(c, t.prior_q.period_end, start=t.prior_q.ytd_start())
+                if comp is not None:
+                    facts[2], sources[2] = comp, t.current_q
+                    comparative = (f"prior-year YTD taken from the comparison column of 10-Q {t.current_q.period_end}, "
+                                   f"because 10-Q {t.prior_q.period_end} does not show the line")
             matched_by_label = []
             for k, ((f, annual), x) in enumerate(zip(filings, facts)):
                 if x is None and f is not None and label and section.endswith("Cash Flows"):
@@ -122,6 +144,16 @@ class Calculator:
                     if alt is not None:
                         facts[k] = alt
                         matched_by_label.append(f"{f.form} {f.period_end} tags it {alt.concept}")
+            if displayed and any(x is None for x in facts):
+                # last resort: the same concept elsewhere (e.g. income statement), disclosed
+                for k, ((f, annual), x) in enumerate(zip(filings, facts)):
+                    if x is None and f is not None and not (k == 2 and sources[2] is not f):
+                        alt = self._annual(f, c) if annual else self._ytd(f, c)
+                        if alt is not None and not alt.section.endswith("Cash Flows"):
+                            facts[k] = alt
+                            matched_by_label.append(f"{f.form} {f.period_end} read from {alt.section}")
+                if not section:
+                    section = next((x.section for x in facts if x is not None), "")
             # A cash-flow line the company does not present at all in a filing's cash-flow
             # statement is nil for that period (accounting convention). Narrow on purpose:
             # if the line appears anywhere in that statement but not for the needed period,
@@ -137,14 +169,14 @@ class Calculator:
                 where = f"{miss[0].form} {miss[0].period_end}" if miss[0] else "prior-year 10-Q"
                 last_missing = f"{name}: {c} not found in {where}"
                 continue
-            notes = []
+            notes = [comparative] if comparative else []
             if matched_by_label:
                 notes.append("matched by line label: " + "; ".join(matched_by_label))
             if not_presented:
                 notes.append("line not presented in the cash-flow statement of " + ", ".join(not_presented) + "; treated as $0")
             note = "; ".join(notes)
             v_of = lambda x: 0.0 if x == 0.0 and not isinstance(x, Fact) else val(x)  # noqa: E731
-            cites = [self.cite(f, x) for (f, _), x in zip(filings, facts) if isinstance(x, Fact)]
+            cites = [self.cite(src, x) for src, x in zip(sources, facts) if isinstance(x, Fact)]
             a = facts[0]
             if t.current_q is None:
                 return Input(name, v_of(a), f"10-K FY {fmt_money(v_of(a))}", cites, note=note)
@@ -158,6 +190,17 @@ class Calculator:
             tried = ", ".join(c.split(":")[-1] for c in concepts)
             return Input(name, None, note=f"{name}: not disclosed in the filings used (looked for {tried})")
         return Input(name, None, note=last_missing or f"{name}: not found")
+
+    @staticmethod
+    def _cf_fact(f: Filing, concept: str, annual: bool) -> Fact | None:
+        start = f.ytd_start()
+        for x in f.total_facts(concept):
+            c = x.context
+            if not x.section.endswith("Cash Flows") or c.instant or c.end != f.period_end or c.start is None:
+                continue
+            if (annual and 330 <= (c.end - c.start).days <= 380) or (not annual and c.start == start):
+                return x
+        return None
 
     def _presented(self, f: Filing, concept: str, label: str) -> bool:
         want = self._norm(label)
