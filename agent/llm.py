@@ -26,7 +26,29 @@ def _extract_json(text: str) -> dict:
     start, end = text.find("{"), text.rfind("}")
     if start < 0 or end < 0:
         raise LLMError("model did not return JSON")
-    return json.loads(text[start:end + 1])
+    body = text[start:end + 1]
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError as first:
+        fixed = repair_json(body)
+        try:
+            return json.loads(fixed)
+        except json.JSONDecodeError:
+            near = body[max(0, first.pos - 60):first.pos + 40].replace("\n", " ")
+            raise LLMError(f"{first.msg} at char {first.pos}; near: ...{near}...") from first
+
+
+_MISSING_COMMA = re.compile(r'(["}\]]|\d|true|false|null)(\s*\n\s*)(["{\[])')
+_TRAILING_COMMA = re.compile(r",(\s*[}\]])")
+
+
+def repair_json(body: str) -> str:
+    """Fix the two slips the model makes most: a missing comma between items written on
+    separate lines, and a trailing comma before a closing bracket. JSON strings cannot
+    contain raw line breaks, so a line break always sits between tokens and inserting a
+    comma there never changes a value."""
+    body = _MISSING_COMMA.sub(r"\1,\2\3", body)
+    return _TRAILING_COMMA.sub(r"\1", body)
 
 
 class AnthropicLLM:
