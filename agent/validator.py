@@ -28,8 +28,35 @@ def trade_language(text: str) -> list[str]:
     return sorted({m.group(0).lower() for m in TRADE_LANGUAGE.finditer(cleaned)})
 
 
-def check_model_output(out: dict, cash_cands: set[str], dep_cands: set[str], news_ids: set[str]) -> list[str]:
+_QUOTED = re.compile(r'"([^"]{3,400})"|“([^”]{3,400})”|\'([^\']{6,400})\'|‘([^’]{6,400})’')
+
+
+def _norm(t: str) -> str:
+    return re.sub(r"[^a-z0-9 ]", "", re.sub(r"\s+", " ", (t or "").lower())).strip()
+
+
+def strip_injection_quotes(text: str, injected: list[str]) -> str:
+    """Remove quoted spans that reproduce a detected embedded instruction, so quoting an
+    attack in order to report it is not mistaken for the agent recommending a trade.
+    Only spans matching a detected injection are removed; any other buy/sell wording,
+    quoted or not, is still checked."""
+    inj = [_norm(q) for q in injected if q and len(_norm(q)) >= 6]
+    if not inj:
+        return text or ""
+
+    def repl(m):
+        span = _norm(next(g for g in m.groups() if g))
+        hit = any(span and (span in q or q in span) for q in inj)
+        return " [quoted embedded instruction] " if hit else m.group(0)
+
+    return _QUOTED.sub(repl, text or "")
+
+
+def check_model_output(out: dict, cash_cands: set[str], dep_cands: set[str], news_ids: set[str],
+                       injected: list[str] | None = None) -> list[str]:
     errs: list[str] = []
+    injected = list(injected or []) + [e.get("quote", "") for e in (out.get("embedded_instructions") or [])
+                                       if isinstance(e, dict)]
     mp = out.get("mapping") or {}
     if not isinstance(mp, dict):
         return ["'mapping' must be an object"]
@@ -57,7 +84,7 @@ def check_model_output(out: dict, cash_cands: set[str], dep_cands: set[str], new
         errs.append(f"brief has {len(brief.split())} words; limit is {C.MAX_BRIEF_WORDS}")
     texts = [brief, out.get("thesis_check") or ""] + list(out.get("what_changed") or [])
     texts += [n.get("causal_path", "") for n in out.get("news") or []]
-    bad = trade_language(" ".join(texts))
+    bad = trade_language(strip_injection_quotes(" ".join(texts), injected))
     if bad:
         errs.append(f"contains trade/recommendation language: {bad}")
     labelled = set()
