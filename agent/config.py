@@ -34,7 +34,9 @@ APPROVED_DOMAINS = [
     "apnews.com", "marketwatch.com", "businesswire.com", "prnewswire.com", "globenewswire.com",
 ]
 
-MAX_BRIEF_WORDS = 200
+MAX_BRIEF_WORDS = 200      # at most: what changed + check before deciding + thesis check
+MAX_NEWS_WORDS = 200       # at most: the "News that matters" section, counted separately
+MAX_NEWS_ITEMS = 5         # most important first, one sentence each
 MAX_REVIEWER_CHARS = 500
 NEWS_LOOKBACK_DAYS = 30
 

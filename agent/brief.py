@@ -35,10 +35,13 @@ BRIEF_SPEC = """Return this JSON object:
   "check": [{"text": "<one sentence: what Shubhansh should look at before deciding>", "basis": "fact|inference"}],
   "thesis_check": "<if thesis_note is given: does it still hold, one or two sentences; else null>"
 }
-Rules: 1-3 items per list (news may be empty if there is no news; check may be empty if nothing needs judgment).
+Rules: what_changed and check have 1-3 items each (check may be empty if nothing needs judgment).
+news has at most 5 items, ONE sentence each, most important first (anything that could move ROE or Owner
+Earnings Yield in the next 6-12 months, or an upcoming earnings date, comes first); empty if there is no news.
 What changed = versus the baseline if one is given, otherwise the key facts of this first run.
 Mention a standing decision only if it is listed in decisions_applied, by its name.
-At most 170 words in total. Plain sentences, no markdown."""
+Word limits, counted separately: what_changed + check + thesis_check at most 170 words; news at most 170 words.
+Plain sentences, no markdown."""
 
 
 @dataclass
@@ -64,8 +67,12 @@ class Brief:
         return "\n".join(lines)
 
     def body_words(self) -> int:
-        parts = [i.get("text", "") for k, _ in self.SECTIONS for i in getattr(self, k)]
+        """Words outside "News that matters" (that section has its own limit)."""
+        parts = [i.get("text", "") for k, _ in self.SECTIONS if k != "news" for i in getattr(self, k)]
         return len(" ".join(parts + [self.thesis_check or ""]).split())
+
+    def news_words(self) -> int:
+        return len(" ".join(i.get("text", "") for i in self.news).split())
 
 
 # ------------------------------------------------------------------ inputs
@@ -168,7 +175,9 @@ def check_brief(b: Brief, row, decisions, ctx: dict, injected: list[str]) -> lis
     if not body.strip():
         errs.append("brief is empty")
     if b.body_words() > C.MAX_BRIEF_WORDS:
-        errs.append(f"brief has {b.body_words()} words; limit is {C.MAX_BRIEF_WORDS}")
+        errs.append(f"brief (excluding news) has {b.body_words()} words; limit is {C.MAX_BRIEF_WORDS}")
+    if b.news_words() > C.MAX_NEWS_WORDS:
+        errs.append(f"'News that matters' has {b.news_words()} words; limit is {C.MAX_NEWS_WORDS}")
     for key, _ in Brief.SECTIONS:
         for i in getattr(b, key):
             if i.get("basis") not in {"fact", "inference"}:
@@ -200,5 +209,8 @@ def check_brief(b: Brief, row, decisions, ctx: dict, injected: list[str]) -> lis
 def parse(out: dict, head: str) -> Brief:
     def items(key):
         v = out.get(key) or []
-        return [i if isinstance(i, dict) else {"text": str(i), "basis": "inference"} for i in v][:3]
-    return Brief(head, items("what_changed"), items("news"), items("check"), out.get("thesis_check") or None)
+        return [i if isinstance(i, dict) else {"text": str(i), "basis": "inference"} for i in v]
+    # The model lists news most important first, so extra items are cut from the end. Every news item
+    # stays in the news table on screen with its label, so nothing is hidden from the reviewer.
+    return Brief(head, items("what_changed")[:3], items("news")[:C.MAX_NEWS_ITEMS], items("check")[:3],
+                 out.get("thesis_check") or None)
