@@ -49,3 +49,20 @@ NEWS_LOOKBACK_DAYS = 30
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "anthropic")
 ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-5-5")
 SEC_USER_AGENT = os.getenv("SEC_USER_AGENT", "investor-research-agent (contact: set SEC_USER_AGENT)")
+
+
+# ------------------------------------------------------------------ clock
+# The hosting server runs on UTC. Every date and time the agent shows or uses is US Eastern
+# (New York, the market's clock), so "today" does not flip to tomorrow at 7-8 pm ET.
+from datetime import date as _date, datetime as _datetime  # noqa: E402
+from zoneinfo import ZoneInfo as _ZoneInfo  # noqa: E402
+
+MARKET_TZ = _ZoneInfo("America/New_York")
+
+
+def now_et() -> _datetime:
+    return _datetime.now(MARKET_TZ)
+
+
+def today_et() -> _date:
+    return now_et().date()

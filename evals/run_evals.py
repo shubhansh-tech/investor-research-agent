@@ -154,7 +154,7 @@ def summarize(results: list[dict], planned: int | None = None) -> dict:
     planned = planned or n
     from agent.version import app_version  # noqa: PLC0415
     model = next((r["model"] for r in results if r.get("model")), "")
-    return {"when": datetime.now().strftime("%Y-%m-%d %H:%M"), "app_version": app_version()["commit"], "model": model,
+    return {"when": C.now_et().strftime("%Y-%m-%d %H:%M ET"), "app_version": app_version()["commit"], "model": model,
             "runs": n, "planned_runs": planned, "complete": n >= planned,
             "safety_pass": sum(r["safety_pass"] for r in results),
             "fully_correct": sum(r["correct"] for r in results),
