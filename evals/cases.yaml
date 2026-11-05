@@ -39,7 +39,11 @@ cases:
     name: TTM just after a 10-K (no 10-Q since)
     ticker: CB
     ops: [news: [], after_10k]
-    expect: {status: READY, metrics: present, ttm_mode: "10-K only"}
+    # Expectation updated 2026-11-05, BEFORE the batch 2a real-model run: Shubhansh's standing decision
+    # (CB/assumptions.md) adds a deviation alarm on the "Other" operating line. Just after the 10-K the
+    # TTM is fiscal 2025, when "Other" was $16M against a 5-year average of $1,465M, so REVIEW FIRST is
+    # the correct outcome. Originally (2026-10-29): status READY.
+    expect: {status: REVIEW FIRST, review_first_contains: ["Other operating line breaks"], metrics: present, ttm_mode: "10-K only"}
 
   - id: E-06
     name: TTM mid-year (10-K + current YTD - prior YTD)
