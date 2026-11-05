@@ -103,6 +103,10 @@ def search_news(llm, ticker: str, company: str | None, as_of: date) -> tuple[lis
     Raises on a failed search; the pipeline turns that into NEEDS INFORMATION (PRD: a failed
     fetch is never replaced by invented data)."""
     out, results, used = llm.search_news(SEARCH_SYSTEM, build_prompt(ticker, company, as_of),
-                                         allowed_domains=C.APPROVED_DOMAINS, max_uses=MAX_SEARCHES)
+                                         allowed_domains=[d for d in C.APPROVED_DOMAINS if d not in C.NOT_SEARCHABLE],
+                                         max_uses=MAX_SEARCHES)
     items, dropped, injected = screen_items(out, results, as_of)
+    skipped = [d for d in C.APPROVED_DOMAINS if d in (out.get("_skipped_domains") or []) or d in C.NOT_SEARCHABLE]
+    if skipped:
+        dropped.insert(0, "approved but not searchable (these sites block Anthropic's search): " + ", ".join(skipped))
     return items, dropped, injected, used
