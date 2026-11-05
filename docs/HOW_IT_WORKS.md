@@ -9,7 +9,7 @@
 | 3. New-filing check | Code | Compares EDGAR's filing list with your fetch logs by **accession number** (EDGAR's unique ID per filing). A 10-K, 10-Q or Item 2.02/4.02 8-K you have not saved → **NEEDS INFORMATION**; nothing is recalculated. |
 | 4. TTM selection | Code | Picks the latest 10-K, the latest 10-Q after it and the same quarter a year earlier. TTM = 10-K + current YTD − prior-year YTD (or the 10-K alone right after a 10-K). |
 | 5. Accounting check | Code | Assets = liabilities + equity on every balance sheet used. |
-| 6. News and events | Code + AI | Code reads news (synthetic in test mode) and EDGAR event filings and runs keyword detectors for material events and embedded instructions. The AI labels each item positive / negative / mixed / uncertain with its causal path. |
+| 6. News and events | Code + AI | Code reads news (synthetic in test mode; in daily use a web search of the past 30 days limited to approved sites, keeping only links the search returned) and EDGAR event filings and runs keyword detectors for material events and embedded instructions. The AI labels each item positive / negative / mixed / uncertain with its causal path. |
 | 7. Judgment | AI | Chooses **which cash-flow line items** are D&A, other non-cash charges and working-capital changes, flags one-time items, writes the brief (under 200 words) and checks the thesis. It never types a number. |
 | 8. Calculator | Code | Looks up the chosen line items in the filings and computes ROE and Owner Earnings Yield, keeping a citation for every input. |
 | 9. Validator | Code | Every number exists in the cited filing; no buy/sell language; approved sources only; no mixing of test and live data. Model-output problems get one retry, then the row stops at NEEDS INFORMATION. |
