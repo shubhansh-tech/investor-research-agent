@@ -33,11 +33,9 @@ OUTPUT_SPEC = """Return this JSON object:
             "causal_path": "<how it could affect ROE or Owner Earnings Yield over 6-12 months, for THIS company>",
             "fact_or_inference": "reported fact|inference|unverified claim",
             "material_event": "guidance cut|restatement|auditor change|going-concern warning|late-filing notice|large insider sale|null"}],
-  "embedded_instructions": [{"id": "<news id>", "quote": "<the instruction text, max 25 words>"}],
-  "what_changed": ["<top 1-3 changes since the baseline, short>"],
-  "brief": "<under 200 words. Separate facts from inference. Cite news as [N1], filings as [10-K], [10-Q]. No buy/sell/hold language.>",
-  "thesis_check": "<if a thesis note is given: does it still hold, and why; else null>"
+  "embedded_instructions": [{"id": "<news id>", "quote": "<the instruction text, max 25 words>"}]
 }
+(The brief is written in a separate step, after code has computed and checked the metrics.)
 Concepts listed in "decided_items" are already decided by Shubhansh and are applied by code: do NOT put them
 in mapping lists or one_time_items, and do not ask about them. Do not list news items or filings (N#, F#) as
 one_time_items; judge them only in "news".

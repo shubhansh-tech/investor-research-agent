@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import config as C
 from . import storage
+from . import brief as brief_mod
 from .decisions import load as load_decisions
 from .calc import Calculator, Mapping, Metric, balance_check, fmt_money, pct
 from .filings import (FilingRow, edgar_list_live, edgar_list_snapshot, find_new_filings, load_filings,
@@ -50,6 +51,7 @@ class ReviewRow:
     news: list[dict] = field(default_factory=list)
     embedded_instructions: list[dict] = field(default_factory=list)
     brief: str = ""
+    brief_obj: object = None             # agent.brief.Brief (headline + sections) once written
     thesis_check: str | None = None
     checks: list[str] = field(default_factory=list)          # passed checks (shown to reviewer)
     ttm_mode: str = ""
@@ -347,9 +349,6 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     if row.embedded_instructions:
         row.review_first.insert(0, "instructions embedded in content were ignored: " +
                                 "; ".join(f"{e['id']}: \"{e['quote'][:120]}\"" for e in row.embedded_instructions))
-    row.what_changed = list(out.get("what_changed") or [])[:3]
-    row.brief = out.get("brief", "")
-    row.thesis_check = out.get("thesis_check")
 
     # ---------------- ACT: calculator
     calc = Calculator(ttm, log_kq + log_8k, history)
@@ -376,7 +375,35 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     if not serr:
         row.checks.append("Sources: no test/live mixing" + ("" if test_mode else "; all links from approved domains"))
     row.missing += cerr + serr
-    row.checks.append("No buy/sell or price-target language in the brief")
+
+    # ---------------- WRITE: the brief, from the finished and checked row
+    provisional = NEEDS_INFO if row.missing else (REVIEW_FIRST if row.review_first else READY)
+    head = brief_mod.headline(row, provisional, base)
+    bctx = brief_mod.build_context(row, provisional, base, decisions, thesis)
+    berrs: list[str] = []
+    final = None
+    for attempt in (1, 2):
+        try:
+            bout = llm.complete_json(brief_mod.BRIEF_SYSTEM, brief_mod.build_prompt(bctx, berrs if attempt == 2 else None),
+                                     max_tokens=1200)
+            cand = brief_mod.parse(bout, head)
+            berrs = brief_mod.check_brief(cand, row, decisions, bctx, [e["quote"] for e in row.embedded_instructions])
+        except Exception as e:  # noqa: BLE001
+            cand, berrs = None, [f"model call or JSON parsing failed: {e}"]
+        tr(f"Brief attempt {attempt}: {'passed checks' if not berrs else 'failed: ' + '; '.join(berrs)[:300]}")
+        if not berrs:
+            final = cand
+            break
+    if final is None:
+        row.brief_obj = brief_mod.Brief(head)
+        row.missing.append("brief failed checks after one regeneration: " + "; ".join(berrs))
+    else:
+        row.brief_obj = final
+        row.checks.append("Brief: every amount and percentage traces to this run's data; no contradiction with the "
+                          "metrics; no buy/sell or price-target language")
+    row.brief = row.brief_obj.text()
+    row.what_changed = [i.get("text", "") for i in row.brief_obj.what_changed]
+    row.thesis_check = row.brief_obj.thesis_check
     tr(f"Validator: {len(cerr) + len(serr)} problem(s)")
     return finish()
 
