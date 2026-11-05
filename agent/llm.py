@@ -82,13 +82,26 @@ class AnthropicLLM:
         """Anthropic's server-side web search, limited by the API to allowed_domains.
         Returns (JSON answer, every search result the API returned, searches used).
         The model's only tool here is web search: it cannot act on anything."""
-        tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": max_uses,
-                "allowed_domains": allowed_domains}
+        import anthropic
+        domains = list(allowed_domains)
+        skipped: list[str] = []
         messages = [{"role": "user", "content": user}]
         results, texts, used = [], [], 0
-        for _ in range(3):        # a long search turn may pause; continue it at most twice
-            resp = self.client.messages.create(model=self.model, max_tokens=max_tokens, system=system,
-                                               messages=messages, tools=[tool])
+        for _ in range(4):        # a long search turn may pause; continue it at most twice
+            tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": max_uses,
+                    "allowed_domains": domains}
+            try:
+                resp = self.client.messages.create(model=self.model, max_tokens=max_tokens, system=system,
+                                                   messages=messages, tools=[tool])
+            except anthropic.BadRequestError as e:
+                # Some publishers block Anthropic's crawler, and the API then rejects the whole request.
+                # Drop exactly the sites it names (once) and search the rest; the screen lists them.
+                blocked = re.findall(r"'([a-z0-9.-]+\.[a-z]{2,})'", str(e).split("accessible to our user agent", 1)[-1])
+                if "not accessible to our user agent" not in str(e) or not blocked or skipped:
+                    raise
+                skipped = [d for d in domains if d in blocked]
+                domains = [d for d in domains if d not in blocked]
+                continue
             usage = getattr(getattr(resp, "usage", None), "server_tool_use", None)
             used += int(getattr(usage, "web_search_requests", 0) or 0)
             for b in resp.content:
@@ -105,7 +118,9 @@ class AnthropicLLM:
             if getattr(resp, "stop_reason", "") != "pause_turn":
                 break
             messages = messages + [{"role": "assistant", "content": resp.content}]
-        return _extract_json("".join(texts)), results, used
+        out = _extract_json("".join(texts))
+        out["_skipped_domains"] = skipped
+        return out, results, used
 
 
 class MockLLM:
