@@ -88,6 +88,16 @@ class MockLLM:
         self.last_payload: dict | None = None
 
     def complete_json(self, system: str, user: str, max_tokens: int = 4000) -> dict:
+        if "BRIEF_CONTEXT_JSON:" in user:
+            ctx = json.loads(user.split("BRIEF_CONTEXT_JSON:", 1)[1])
+            roe = (ctx.get("roe") or {}).get("value")
+            oey = (ctx.get("owner_earnings_yield") or {}).get("value")
+            changed = [{"text": f"Mock brief: ROE {roe} and Owner Earnings Yield {oey} as computed by code."
+                        if roe and oey else "Mock brief: metrics are withheld; see missing information.",
+                        "basis": "fact"}]
+            news = [{"text": f"[{n['id']}] {n['title'][:80]} (impact {n.get('impact')}).", "basis": "fact"}
+                    for n in ctx.get("news") or []][:3]
+            return {"what_changed": changed, "news": news, "check": [], "thesis_check": None}
         payload = json.loads(user.split("CONTEXT_JSON:", 1)[1])
         self.last_payload = payload
         cands = payload["cash_flow_candidates"]
@@ -113,10 +123,6 @@ class MockLLM:
             "one_time_items": [],
             "news": news,
             "embedded_instructions": [],
-            "what_changed": ["Mock run: no model reasoning applied."],
-            "brief": "Mock brief for testing the pipeline. Figures are computed by code from cited filings. "
-                     "No model judgment was applied, so treat news labels as placeholders.",
-            "thesis_check": None,
         }
 
     def complete_text(self, system: str, user: str, max_tokens: int = 800) -> str:
