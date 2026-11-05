@@ -39,7 +39,8 @@ Rules: what_changed and check have 1-3 items each (check may be empty if nothing
 news has at most 5 items, ONE sentence each, most important first (anything that could move ROE or Owner
 Earnings Yield in the next 6-12 months, or an upcoming earnings date, comes first); empty if there is no news.
 What changed = versus the baseline if one is given, otherwise the key facts of this first run.
-Mention a standing decision only if it is listed in decisions_applied, by its name.
+Mention a standing decision only if it is listed in decisions_applied, by its name; when it has
+in_plain_words, describe its effect with those words (never as "removes -$X").
 Word limits, counted separately: what_changed + check + thesis_check at most 170 words; news at most 170 words.
 Plain sentences, no markdown."""
 
@@ -111,6 +112,19 @@ def _metric_ctx(m) -> dict | None:
             "assumptions": m.assumptions, "missing": m.missing}
 
 
+def _plain_decision(d, inp) -> str | None:
+    """Say what a decision did in investor words. The cash-flow line carries the opposite sign of the
+    profit effect (a non-cash gain is subtracted on the cash-flow statement), which made briefs say
+    confusing things like "removes -$17.7M". Only for 'remove', where the amount is the whole line."""
+    if inp is None or inp.value is None or d.treatment != "remove":
+        return None
+    effect = -inp.value
+    kind = "gain" if effect > 0 else "loss"
+    direction = "lower" if effect > 0 else "higher"
+    return (f"a non-cash {kind} of {fmt_money(abs(effect))} in reported profit is taken out, so owner earnings "
+            f"are {fmt_money(abs(effect))} {direction} than if it were kept")
+
+
 def build_context(row, provisional_status: str, baseline: dict | None, decisions, thesis: str | None) -> dict:
     applied = []
     if decisions is not None:
@@ -118,7 +132,8 @@ def build_context(row, provisional_status: str, baseline: dict | None, decisions
         for d in decisions.items:
             inp = amounts.get(d.name)
             applied.append({"name": d.name, "treatment": d.treatment,
-                            "this_period": fmt_money(inp.value) if inp is not None else None})
+                            "this_period": fmt_money(inp.value) if inp is not None else None,
+                            "in_plain_words": _plain_decision(d, inp)})
     return {
         "ticker": row.ticker, "as_of": row.as_of, "status": provisional_status, "test_mode": row.test_mode,
         "roe": _metric_ctx(row.roe), "owner_earnings_yield": _metric_ctx(row.oey), "price": row.price,
