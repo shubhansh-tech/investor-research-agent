@@ -60,6 +60,7 @@ class Metric:
     inputs: list[Input] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
     assumptions: list[str] = field(default_factory=list)
+    alarms: list[str] = field(default_factory=list)          # REVIEW FIRST reasons raised by decided-item alarms
 
 
 @dataclass
@@ -85,8 +86,38 @@ def pct(v: float | None) -> str:
 
 
 class Calculator:
-    def __init__(self, ttm: TTMSet, logs: list[FilingRow]):
+    def __init__(self, ttm: TTMSet, logs: list[FilingRow], history: list[Filing] | None = None):
         self.ttm, self.logs = ttm, logs
+        self.history = history or []          # older 10-Ks (<TICKER>/history/) for multi-year averages
+
+    # ------------------------------------------------------------ multi-year history
+    def annual_series(self, concepts: list[str], years: int) -> list[tuple[int, Fact, Filing]]:
+        """Last `years` fiscal-year values of a cash-flow line, newest filing first for overlapping
+        years (companies sometimes restate). Matches the tag, else the identical printed label."""
+        t = self.ttm
+        if t.annual is None:
+            return []
+        filings = [t.annual] + sorted([h for h in self.history if h.form.startswith("10-K")],
+                                      key=lambda f: f.period_end, reverse=True)
+        label = ""
+        found: dict[int, tuple[Fact, Filing]] = {}
+        for f in filings:
+            for x in f.facts:
+                c = x.context
+                if not x.section.endswith("Cash Flows") or c.instant or c.has_dimensions or c.start is None:
+                    continue
+                if not 330 <= (c.end - c.start).days <= 380:
+                    continue
+                hit = x.concept in concepts or (label and self._norm(x.label) == self._norm(label))
+                if hit:
+                    label = label or x.label
+                    found.setdefault(c.end.year, (x, f))
+        last = t.annual.period_end.year
+        return [(y, *found[y]) for y in range(last - years + 1, last + 1) if y in found]
+
+    def _alarm_base(self, ni: Input) -> float:
+        _, e1 = self.equity()
+        return max(abs(ni.value or 0.0), 0.01 * abs(e1.value or 0.0))
 
     # ------------------------------------------------------------ helpers
     def cite(self, f: Filing, fact: Fact) -> Citation:
@@ -264,18 +295,26 @@ class Calculator:
         m.formula += f"\n= {fmt_money(ni.value)} / {fmt_money(avg)} = {pct(m.value)}"
         return m
 
-    def owner_earnings_yield(self, mapping: Mapping, price: float | None, overrides: dict | None = None) -> Metric:
+    def owner_earnings_yield(self, mapping: Mapping, price: float | None, overrides: dict | None = None,
+                             decisions=None) -> Metric:
         overrides = overrides or {}
         m = Metric("Owner Earnings Yield", None,
                    formula=("Owner Earnings = TTM net income + D&A + other non-cash charges - maintenance capex "
                             "(assumed = depreciation) +/- working-capital changes; Yield = Owner Earnings / market cap"))
+        decided = decisions.by_concept() if decisions is not None else {}
         ni = self.flow("TTM net income", NI_CONCEPTS)
-        da = self.flow("Depreciation & amortization", [mapping.da_concept] if mapping.da_concept else DA_CONCEPTS, displayed=True)
+        da_concept = mapping.da_concept if mapping.da_concept not in decided else None
+        da = self.flow("Depreciation & amortization", [da_concept] if da_concept else DA_CONCEPTS, displayed=True)
         parts = [ni, da]
+        # The model's line-item choices apply only to lines Shubhansh has NOT decided.
         for c in mapping.other_non_cash:
-            parts.append(self.flow(f"Non-cash: {c.split(':')[-1]}", [c], displayed=True))
+            if c not in decided:
+                parts.append(self.flow(f"Non-cash: {c.split(':')[-1]}", [c], displayed=True))
         for c in mapping.working_capital:
-            parts.append(self.flow(f"Working capital: {c.split(':')[-1]}", [c], displayed=True))
+            if c not in decided:
+                parts.append(self.flow(f"Working capital: {c.split(':')[-1]}", [c], displayed=True))
+        if decisions is not None and decisions.items:
+            parts += self._apply_decisions(decisions, ni, m)
         if "maintenance_capex" in overrides:
             src = overrides.get("maintenance_capex_source", "Reject feedback")
             mc = Input("Maintenance capex (Shubhansh's assumption)", float(overrides["maintenance_capex"]),
@@ -283,12 +322,20 @@ class Calculator:
                        note="reviewer override")
             m.assumptions.append(f"Maintenance capex was used per direction of Shubhansh ({src}), "
                                  "because the rule 'maintenance capex = depreciation' needs a figure he supplied.")
-            if da.value is None:
-                # Depreciation is already deducted inside reported net income. If the company does not
-                # disclose it, the same estimate must be added back, or depreciation is counted twice.
+            # Depreciation is already deducted inside reported net income. If the company does not disclose
+            # DEPRECIATION (an amortization line found as "D&A" does not count), the same estimate must be added
+            # back, or depreciation is counted twice: once in net income and again as maintenance capex.
+            dep = self.flow("Depreciation", [mapping.dep_concept] if mapping.dep_concept else DEP_CONCEPTS)
+            da_is_depreciation = da.value is not None and any(
+                "epreciation" in (x.concept + " " + x.label) for x in da.citations)
+            if dep.value is None and not da_is_depreciation:
                 est = float(overrides["maintenance_capex"])
-                parts[1] = Input("Depreciation add-back (same estimate)", est,
-                                 f"{fmt_money(est)} per Shubhansh ({src}); depreciation not disclosed", note="reviewer override")
+                addback = Input("Depreciation add-back (same estimate)", est,
+                                f"{fmt_money(est)} per Shubhansh ({src}); depreciation not disclosed", note="reviewer override")
+                if da.value is None:
+                    parts[1] = addback
+                else:
+                    parts.insert(2, addback)       # keep the amortization line too; it is a separate add-back
                 m.assumptions.append("Depreciation is not disclosed, so the same estimate is added back to net income; "
                                      "with maintenance capex = depreciation the two cancel and the estimate does not "
                                      "change Owner Earnings.")
@@ -321,6 +368,69 @@ class Calculator:
         m.value = oe / mcap
         m.formula += f"\n= {fmt_money(oe)} / {fmt_money(mcap)} = {pct(m.value)}"
         return m
+
+
+    # ------------------------------------------------------------ standing decisions
+    def _apply_decisions(self, decisions, ni: Input, m: Metric) -> list[Input]:
+        from .decisions import DEVIATION_ALARM, MIN_HISTORY_YEARS, SIZE_ALARM  # noqa: PLC0415
+        out: list[Input] = []
+        base = self._alarm_base(ni) if ni.value is not None else None
+        anchor = self.ttm.current_q or self.ttm.annual
+        for d in decisions.items:
+            ttm = self.flow(d.name, d.concepts, displayed=True)
+            if ttm.value is None and not self._present_anywhere(d.concepts):
+                continue          # line not reported by this company in these filings: nothing to apply
+            if d.treatment in {"exclude", "keep"}:
+                if ttm.value is not None:
+                    verb = "left out of owner earnings" if d.treatment == "exclude" else "kept in profit as reported"
+                    m.assumptions.append(f"{d.name}: {verb} by Shubhansh's standing decision "
+                                         f"(this period's cash-flow line {fmt_money(ttm.value)}).")
+                continue
+            if ttm.value is None:
+                out.append(Input(f"Decided ({d.treatment}): {d.name}", None, note=ttm.note or f"{d.name}: not found"))
+                continue
+            series = self.annual_series(d.concepts, d.years) if d.treatment in {"normalize", "as_reported"} else []
+            avg = sum(x.displayed_value for _, x, _ in series) / len(series) if series else None
+            hist = ", ".join(f"{y}: {fmt_money(-x.displayed_value if d.treatment == 'normalize' else x.displayed_value)}"
+                             for y, x, _ in series)
+            hist_cites = [self.cite(f, x) for _, x, f in series]
+            if d.treatment == "normalize":
+                if len(series) < max(d.years, MIN_HISTORY_YEARS):
+                    have = {y for y, _, _ in series}
+                    last = self.ttm.annual.period_end.year
+                    need = [y for y in range(last - d.years + 1, last + 1) if y not in have]
+                    out.append(Input(f"Decided ({d.years}-yr average): {d.name}", None,
+                                     note=(f"{d.name}: the decided {d.years}-year average needs fiscal years "
+                                           f"{', '.join(map(str, need))}; add the 10-K covering them to the ticker's history/ "
+                                           f"folder (each 10-K holds 3 years)")))
+                    continue
+                value = ttm.value - avg
+                how = (f"this period's effect on profit {fmt_money(-ttm.value)} taken out; {len(series)}-year average effect "
+                       f"{fmt_money(-avg)} used instead ({hist})")
+                out.append(Input(f"Decided ({len(series)}-yr average): {d.name}", value, how, ttm.citations + hist_cites,
+                                 note="standing decision"))
+            else:   # remove or as_reported: include the cash-flow line as reported
+                label = "removed (non-cash)" if d.treatment == "remove" else "as reported"
+                how = ttm.how + (f"; {len(series)}-year history: {hist}" if series else "")
+                out.append(Input(f"Decided ({label}): {d.name}", ttm.value, how, ttm.citations + hist_cites,
+                                 note="standing decision"))
+            if base is None:
+                continue
+            if d.alarm == "size" and abs(ttm.value) > SIZE_ALARM * base:
+                m.alarms.append(f"unusually large {d.name}: {fmt_money(ttm.value)} this period is "
+                                f"{abs(ttm.value) / base:.0%} of the alarm base (alarm at {SIZE_ALARM:.0%})")
+            if d.alarm == "deviation" and avg is not None and abs(ttm.value - avg) > DEVIATION_ALARM * base:
+                sign = -1 if d.treatment == "normalize" else 1
+                m.alarms.append(f"{d.name} breaks from its {len(series)}-year history: {fmt_money(sign * ttm.value)} this "
+                                f"period vs average {fmt_money(sign * avg)} (gap {abs(ttm.value - avg) / base:.0%} of the "
+                                f"alarm base; alarm at {DEVIATION_ALARM:.0%})")
+        if decisions.items:
+            m.assumptions.append(f"Standing decisions applied from {anchor.path.parent.parent.name}/assumptions.md "
+                                 f"(alarm base = larger of |net income| and 1% of shareholders' equity).")
+        return out
+
+    def _present_anywhere(self, concepts: list[str]) -> bool:
+        return any(x.concept in concepts for f in self.ttm.used() for x in f.facts)
 
 
 def balance_check(f: Filing, on: date) -> tuple[bool, str]:

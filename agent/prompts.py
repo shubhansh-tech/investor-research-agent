@@ -38,6 +38,9 @@ OUTPUT_SPEC = """Return this JSON object:
   "brief": "<under 200 words. Separate facts from inference. Cite news as [N1], filings as [10-K], [10-Q]. No buy/sell/hold language.>",
   "thesis_check": "<if a thesis note is given: does it still hold, and why; else null>"
 }
+Concepts listed in "decided_items" are already decided by Shubhansh and are applied by code: do NOT put them
+in mapping lists or one_time_items, and do not ask about them. Do not list news items or filings (N#, F#) as
+one_time_items; judge them only in "news".
 Rules for mapping: only use concepts that appear in the candidate lists. Use each concept at most once.
 Do not include net income or capital expenditure purchases in other_non_cash or working_capital.
 For an insurer, changes in loss reserves and unearned premiums are operating working-capital-like items;

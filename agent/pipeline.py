@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import config as C
 from . import storage
+from .decisions import load as load_decisions
 from .calc import Calculator, Mapping, Metric, balance_check, fmt_money, pct
 from .filings import (FilingRow, edgar_list_live, edgar_list_snapshot, find_new_filings, load_filings,
                       read_filing_list, select_ttm, ticker_mismatches)
@@ -189,12 +190,15 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     filings, read_errors = load_filings(tdir)
     tr(f"Read {len(filings)} filing(s) from {ticker}/filings/")
     row.missing += read_errors
-    bad = ticker_mismatches(ticker, filings)
+    history, hist_errors = load_filings(tdir, "history") if (tdir / "history").is_dir() else ([], [])
+    history = [h for h in history if h.form.startswith("10-K")]
+    row.missing += [f"history/{e}" for e in hist_errors]
+    bad = ticker_mismatches(ticker, filings + history)
     if bad:
         row.missing += [f"remove or replace: {b}" for b in bad]
         tr("Ticker check failed; stopped before any calculation")
         return finish()
-    row.checks.append(f"All {len(filings)} filings belong to {ticker} (cover-page trading symbol)")
+    row.checks.append(f"All {len(filings)} filings" + (f" and {len(history)} history 10-K(s)" if history else "") + f" belong to {ticker} (cover-page trading symbol)")
 
     log_kq = read_filing_list(tdir / C.FETCH_LOG_10KQ)
     log_8k = read_filing_list(tdir / C.FETCH_LOG_8K)
@@ -251,6 +255,9 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
 
     base = storage.baseline(ledger / ticker, test_mode)
     standing, assumptions_text = read_assumptions(tdir)
+    decisions = load_decisions(tdir)
+    row.missing += decisions.problems
+    decided = decisions.by_concept()
     thesis_p = tdir / C.THESIS_FILE
     thesis = thesis_p.read_text(encoding="utf-8")[:3000] if thesis_p.exists() else None
     if base:
@@ -285,6 +292,7 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
         "baseline": {k: base.get(k) for k in ("date_time", "roe", "owner_earnings_yield", "agent_brief", "shubhansh_brief", "news_labels")} if base else None,
         "thesis_note": thesis,
         "shubhansh_assumptions": assumptions_text,
+        "decided_items": decisions.for_model(),
         "reviewer_feedback_for_this_rerun": feedback,
     }
     if llm is None:
@@ -310,7 +318,17 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     mapping = Mapping(mp.get("da_concept"), mp.get("dep_concept"), list(mp.get("other_non_cash") or []),
                       list(mp.get("working_capital") or []), mp.get("reasons") or {})
     row.mapping_reasons = mapping.reasons
-    row.one_time_items = out.get("one_time_items") or []
+    raw_items = out.get("one_time_items") or []
+    row.one_time_items = []
+    for item in raw_items:
+        ref = str(item.get("concept_or_news_id", "")).strip()
+        if ref in decided:
+            continue                      # Shubhansh decided this item; its alarm (if any) speaks for it
+        if re.fullmatch(r"[NF]\d+", ref):
+            continue                      # news and filings are judged in the news table, not as accounting items
+        row.one_time_items.append(item)
+    if len(row.one_time_items) < len(raw_items):
+        tr(f"One-time items: {len(raw_items) - len(row.one_time_items)} dropped (already decided, or news/filing items)")
     for item in row.one_time_items:
         if item.get("needs_judgment"):
             row.review_first.append(f"one-time item needs judgment: {item.get('concept_or_news_id')} ({item.get('why', '')})")
@@ -334,19 +352,23 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     row.thesis_check = out.get("thesis_check")
 
     # ---------------- ACT: calculator
-    calc = Calculator(ttm, log_kq + log_8k)
+    calc = Calculator(ttm, log_kq + log_8k, history)
     row.roe = calc.roe()
     overrides = {**standing, **parse_overrides(feedback)}   # this rerun's feedback wins over the standing file
     if "maintenance_capex" in parse_overrides(feedback):
         overrides["maintenance_capex_source"] = "Reject feedback on this rerun"
-    row.oey = calc.owner_earnings_yield(mapping, price, overrides)
+    row.oey = calc.owner_earnings_yield(mapping, price, overrides, decisions)
+    row.review_first += row.oey.alarms
+    if decisions.items:
+        row.mapping_reasons = {**row.mapping_reasons,
+                               **{d.name: f"decided by Shubhansh: {d.treatment}" for d in decisions.items}}
     tr(f"Calculator: ROE {pct(row.roe.value) if row.roe.value is not None else row.roe.flag}, "
        f"Owner Earnings Yield {pct(row.oey.value) if row.oey.value is not None else row.oey.flag}")
     for m in (row.roe, row.oey):
         row.missing += [f"{m.name} withheld: {x}" for x in m.missing]
 
     # ---------------- CHECK: validator
-    by_name = {f.path.name: f for f in filings}
+    by_name = {f.path.name: f for f in filings + history}
     cerr = check_citations(row.roe, by_name) + check_citations(row.oey, by_name)
     serr = check_sources(row, test_mode, row.live_calls)
     if not cerr:

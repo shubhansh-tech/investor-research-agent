@@ -213,9 +213,9 @@ def parse_filing_cached(p: Path) -> Filing:
     return dataclasses.replace(f, path=p)
 
 
-def load_filings(tdir: Path) -> tuple[list[Filing], list[str]]:
+def load_filings(tdir: Path, subdir: str = "filings") -> tuple[list[Filing], list[str]]:
     files, errors = [], []
-    for p in sorted((tdir / "filings").glob("*")):
+    for p in sorted((tdir / subdir).glob("*")):
         if p.suffix.lower() not in {".htm", ".html", ".xhtml"}:
             continue
         try:
