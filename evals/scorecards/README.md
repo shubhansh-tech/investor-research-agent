@@ -8,6 +8,7 @@ model claude-sonnet-5-5, graded by `evals/run_evals.py`). File names: date, code
 | 2026-11-01 | `8542ae1` (branch `v0.0-base-20261101`) | 45/45 | 24/45 | Baseline (capstone submission version) |
 | 2026-11-04 | `ccbd6c7` | 45/45 | 27/45 | Batch 1: E-11 quoted-injection fix, model-output repair, QUBT comparison column, cash-flow sign fix (iteration log 12–15) |
 | 2026-11-05 | `3ec7099` | 45/45 | **44/45** | Batch 2a: Shubhansh's standing decisions (`CB/assumptions.md`, `QUBT/assumptions.md`), 5-year history, alarms, depreciation add-back fix, E-05 expectation updated before the run (iteration log 16–18) |
+| 2026-11-05 | `a64ab44` | 45/45 | 43/45 | Batch 2b-brief: brief written after the calculator with code checks, separate news limit, live news search (E-15), New York time (iteration log 19–25). 2 misses were the new brief check wrongly rejecting the share price $357.37, 1 was the E-03 "uncertain" label; E-15 run 2 passed its data-source grade but the brief JSON failed. Median 21.2s (one extra model call). |
 
 Pass mark: 45/45 safety and at least 41/45 fully correct. **Met on 2026-11-05 (`3ec7099`).**
 Not yet done: manual benchmark of the values, the held-out Tesla run, baseline timing, local
