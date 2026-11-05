@@ -125,6 +125,27 @@ def llm_or_none():
 
 
 # ================================================================ helpers
+def esc(text) -> str:
+    """Streamlit renders text between two $ signs as a math formula, which squashes amounts like
+    "$15.0M ... $5.1M" into unreadable italics. Escape $ in anything shown as formatted text."""
+    return str(text or "").replace("$", "\\$")
+
+
+def show_brief(b) -> None:
+    st.markdown("**Agent brief**")
+    lines = [f"**{esc(b.headline)}**"]
+    for key, title in b.SECTIONS:
+        items = getattr(b, key)
+        if items:
+            lines.append(f"\n**{title}**")
+            lines += [f"- *{'Fact' if i.get('basis') == 'fact' else 'Inference'}:* {esc(i.get('text', ''))}" for i in items]
+        elif key == "news":
+            lines.append("\n**News that matters**\n- No material news.")
+    if b.thesis_check:
+        lines.append(f"\n**Thesis check:** {esc(b.thesis_check)}")
+    st.info("\n".join(lines))
+
+
 def badge(status: str) -> str:
     fg, bg = STATUS_STYLE.get(status, ("#444", "#eee"))
     return f'<span class="badge" style="color:{fg};background:{bg}">{status}</span>'
@@ -152,9 +173,9 @@ def metric_block(col, m, baseline):
             if links:
                 st.markdown("Filings on sec.gov: " + " · ".join(f"[{v}]({u})" for u, v in links.items()))
             for a in m.assumptions:
-                st.caption("Assumption: " + a)
+                st.caption("Assumption: " + esc(a))
             for x in m.missing:
-                st.error("Missing: " + x)
+                st.error("Missing: " + esc(x))
 
 
 def rerun_ticker(idx: int, feedback: str):
@@ -222,13 +243,11 @@ with tab_run:
             (" · <b>TEST MODE</b>" if row.test_mode else "") + (f" · model {row.model}" if row.model else "") + "</span>"
         st.markdown(head, unsafe_allow_html=True)
         if item.get("feedback"):
-            st.caption(f"Rerun with reviewer guidance: \"{item['feedback']}\"")
+            st.caption(f"Rerun with reviewer guidance: \"{esc(item['feedback'])}\"")
         if row.review_first:
-            st.warning("**REVIEW FIRST**\n\n" + "\n".join(f"- {r}" for r in row.review_first))
+            st.warning("**REVIEW FIRST**\n\n" + "\n".join(f"- {esc(r)}" for r in row.review_first))
         if row.missing:
-            st.error("**Needs information** (metric withheld, nothing estimated)\n\n" + "\n".join(f"- {m}" for m in row.missing))
-        if row.what_changed:
-            st.markdown("**What changed:** " + " · ".join(row.what_changed))
+            st.error("**Needs information** (metric withheld, nothing estimated)\n\n" + "\n".join(f"- {esc(m)}" for m in row.missing))
         if row.roe is not None or row.oey is not None:
             mc1, mc2 = st.columns(2)
             metric_block(mc1, row.roe, row.baseline_roe)
@@ -240,14 +259,11 @@ with tab_run:
             st.dataframe(pd.DataFrame([{"ID": n["id"], "Impact": n["impact"], "Item": n["title"], "Date": n["date"],
                                         "Why it matters (causal path)": n["causal_path"], "Source": n["url"]} for n in row.news]),
                          hide_index=True, width="stretch")
-        if row.brief:
-            st.markdown("**Agent brief**")
-            st.info(row.brief)
-        if row.thesis_check:
-            st.markdown(f"**Thesis check:** {row.thesis_check}")
+        if row.brief_obj is not None:
+            show_brief(row.brief_obj)
         with st.expander("Checks passed and agent steps"):
             for c in row.checks:
-                st.markdown(f"- ✅ {c}")
+                st.markdown(f"- ✅ {esc(c)}")
             if row.mapping_reasons:
                 st.markdown("**Line items the model chose for Owner Earnings, and why**")
                 st.json(row.mapping_reasons)
@@ -289,7 +305,7 @@ with tab_run:
             item["decision"] = "CANCELLED"
             st.rerun()
         if item.get("answer"):
-            st.markdown(f"**Answer** (brief unchanged): {item['answer']}")
+            st.markdown(f"**Answer** (brief unchanged): {esc(item['answer'])}")
 
     # ---- the log
     logs = sorted(LEDGER.glob(f"*/{C.ANALYSIS_FILE}"))
