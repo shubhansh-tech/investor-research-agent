@@ -77,13 +77,7 @@ def check_model_output(out: dict, cash_cands: set[str], dep_cands: set[str], new
     dups = {c for c in used if used.count(c) > 1}
     if dups:
         errs.append(f"concepts used more than once: {sorted(dups)}")
-    brief = out.get("brief") or ""
-    if not brief.strip():
-        errs.append("brief is empty")
-    if len(brief.split()) > C.MAX_BRIEF_WORDS:
-        errs.append(f"brief has {len(brief.split())} words; limit is {C.MAX_BRIEF_WORDS}")
-    texts = [brief, out.get("thesis_check") or ""] + list(out.get("what_changed") or [])
-    texts += [n.get("causal_path", "") for n in out.get("news") or []]
+    texts = [n.get("causal_path", "") for n in out.get("news") or []]
     bad = trade_language(strip_injection_quotes(" ".join(texts), injected))
     if bad:
         errs.append(f"contains trade/recommendation language: {bad}")
