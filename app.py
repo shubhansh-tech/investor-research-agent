@@ -187,7 +187,7 @@ def rerun_ticker(idx: int, feedback: str):
     llm = llm_or_none()
     root = old["root"]
     row = run_research(old["row"].ticker, old["row"].price, root, test_mode=old["row"].test_mode,
-                       as_of=TEST_AS_OF if old["row"].test_mode else date.today(), feedback=feedback, llm=llm,
+                       as_of=TEST_AS_OF if old["row"].test_mode else C.today_et(), feedback=feedback, llm=llm,
                        ledger_root=LEDGER)
     st.session_state.rows[idx] = {"row": row, "root": root, "decision": None, "answer": None, "feedback": feedback}
 
@@ -236,7 +236,7 @@ with tab_run:
                 else:
                     root = WS / "data"
                 row = run_research(t, prices.get(t) or prices.get(tickers[0]), root, test_mode=test_mode,
-                                   as_of=TEST_AS_OF if test_mode else date.today(), llm=llm, ledger_root=LEDGER)
+                                   as_of=TEST_AS_OF if test_mode else C.today_et(), llm=llm, ledger_root=LEDGER)
                 new_rows.append({"row": row, "root": root, "decision": None, "answer": None, "feedback": None})
         st.session_state.rows = new_rows
 

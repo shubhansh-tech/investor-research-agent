@@ -167,8 +167,8 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     root = Path(data_root)
     ledger = Path(ledger_root) if ledger_root else root   # where analysis.xlsx lives
     ticker = (ticker or "").strip().upper()
-    as_of = as_of or date.today()
-    row = ReviewRow(uuid.uuid4().hex[:10], ticker, f"{as_of.isoformat()} {datetime.now().strftime('%H:%M')} ET", test_mode, price=price)
+    as_of = as_of or C.today_et()
+    row = ReviewRow(uuid.uuid4().hex[:10], ticker, f"{as_of.isoformat()} {C.now_et().strftime('%H:%M')} ET", test_mode, price=price)
     tr = row.trace.append
 
     def finish(save_row: bool = True) -> ReviewRow:
