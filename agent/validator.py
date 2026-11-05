@@ -1,7 +1,7 @@
 """The validator: code checks that run on every row before Approve is possible.
 
 Two kinds of failure:
-  * model-output problems (bad JSON, unknown line item, >200 words, buy/sell
+  * model-output problems (bad JSON, unknown line item, over the word limits, buy/sell
     language) -> the model gets ONE retry with the errors listed, then the row
     stops at NEEDS INFORMATION. No endless loops.
   * data problems (missing input, failed accounting check, uncited number,
