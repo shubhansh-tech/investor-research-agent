@@ -54,5 +54,6 @@ data/<TICKER>/thesis_note.md                 written by the investor; read-only 
 Test mode never calls live EDGAR or news; daily use never reads `_TEST_only` folders.
 
 ## Status
-MVP. Live news search, PROVISIONAL handling of Item 2.02 earnings 8-Ks and a price
+MVP. Daily use searches the past 30 days of news on approved sites only (Anthropic web
+search, links checked by code). PROVISIONAL handling of Item 2.02 earnings 8-Ks and a price
 feed are post-MVP; see the PRD's limitations section.
