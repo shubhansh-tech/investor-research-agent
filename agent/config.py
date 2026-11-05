@@ -34,6 +34,11 @@ APPROVED_DOMAINS = [
     "apnews.com", "marketwatch.com", "businesswire.com", "prnewswire.com", "globenewswire.com",
 ]
 
+# Approved, but these publishers block Anthropic's web crawler, so the news search cannot include them
+# (the API rejects the request; found on the first live run, 2026-11-05). Their links are still accepted
+# as approved sources elsewhere. If a site is added to or removed from the block, the search adapts.
+NOT_SEARCHABLE = ["apnews.com", "barrons.com", "ft.com", "marketwatch.com", "reuters.com", "wsj.com"]
+
 MAX_BRIEF_WORDS = 200      # at most: what changed + check before deciding + thesis check
 MAX_NEWS_WORDS = 200       # at most: the "News that matters" section, counted separately
 MAX_NEWS_ITEMS = 5         # most important first, one sentence each

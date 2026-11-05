@@ -255,7 +255,10 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
         tr(f"Live news search ({getattr(llm, 'name', '')}): {used} search(es) on approved sites, "
            f"{len(news)} item(s) kept, {len(dropped)} dropped")
         for d in dropped:
-            tr(f"News item dropped by code check: {d}")
+            if d.startswith("approved but not searchable"):
+                row.checks.append(f"News: {d}")
+            else:
+                tr(f"News item dropped by code check: {d}")
         for i, q in enumerate(injected):
             row.embedded_instructions.append({"id": f"search-{i + 1}", "quote": q, "by": "news search"})
         if news:
