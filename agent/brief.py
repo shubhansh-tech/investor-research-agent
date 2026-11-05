@@ -45,6 +45,16 @@ Word limits, counted separately: what_changed + check + thesis_check at most 170
 Plain sentences, no markdown."""
 
 
+_ITEMS = {"type": "array", "items": {"type": "object", "properties": {
+    "text": {"type": "string"}, "basis": {"type": "string", "enum": ["fact", "inference"]}},
+    "required": ["text", "basis"]}}
+# The brief is returned through a "tool" whose input must match this shape, so the API always hands
+# back well-formed JSON (no missing commas or stray quotes to repair).
+BRIEF_SCHEMA = {"type": "object", "properties": {
+    "what_changed": _ITEMS, "news": _ITEMS, "check": _ITEMS,
+    "thesis_check": {"type": ["string", "null"]}}, "required": ["what_changed", "news", "check"]}
+
+
 @dataclass
 class Brief:
     headline: str
@@ -108,7 +118,8 @@ def _metric_ctx(m) -> dict | None:
             # Standing decisions keep their "how", because showing both numbers is part of the decision.
             "inputs": [{"name": i.name, "value": (f"{i.value:,.0f} shares" if i.name == "Share count" and i.value
                                                   else fmt_money(i.value)),
-                        **({"detail": i.how[:300]} if i.note == "standing decision" else {})} for i in m.inputs],
+                        **({"detail": i.how[:300]} if i.note == "standing decision" else {})}
+                       for i in m.inputs if not i.name.startswith("Decided (removed")],   # see decisions_applied
             "assumptions": m.assumptions, "missing": m.missing}
 
 
@@ -131,12 +142,13 @@ def build_context(row, provisional_status: str, baseline: dict | None, decisions
         amounts = {i.name.split(": ", 1)[-1]: i for i in (row.oey.inputs if row.oey else []) if i.name.startswith("Decided")}
         for d in decisions.items:
             inp = amounts.get(d.name)
+            plain = _plain_decision(d, inp)
             applied.append({"name": d.name, "treatment": d.treatment,
-                            "this_period": fmt_money(inp.value) if inp is not None else None,
-                            "in_plain_words": _plain_decision(d, inp)})
+                            **({"in_plain_words": plain} if plain else
+                               {"this_period": fmt_money(inp.value) if inp is not None else None})})
     return {
         "ticker": row.ticker, "as_of": row.as_of, "status": provisional_status, "test_mode": row.test_mode,
-        "roe": _metric_ctx(row.roe), "owner_earnings_yield": _metric_ctx(row.oey), "price": row.price,
+        "roe": _metric_ctx(row.roe), "owner_earnings_yield": _metric_ctx(row.oey), "price": f"${row.price:,.2f} per share" if row.price else None,
         "baseline": ({"date": str(baseline.get("date_time", ""))[:10],
                       "roe": pct(float(baseline["roe"])) if baseline.get("roe") is not None else None,
                       "owner_earnings_yield": (pct(float(baseline["owner_earnings_yield"]))
@@ -207,12 +219,18 @@ def check_brief(b: Brief, row, decisions, ctx: dict, injected: list[str]) -> lis
     money, pcts = allowed_numbers(ctx)
     for m in _MONEY.finditer(body):
         v = abs(_money_m(m))
-        if not any(abs(v - a) <= max(0.01 * a, 0.06) for a in money):
+        if not any(abs(v - a) <= (max(0.01 * a, 0.06) if a >= 1 else max(0.01 * a, 1e-8)) for a in money):
             errs.append(f"amount {m.group(0).strip()} does not appear in this run's data")
     for m in _PCT.finditer(body):
         v = abs(float(m.group(2)))
         if not any(abs(v - a) <= 0.15 for a in pcts):
             errs.append(f"percentage {m.group(0).strip()} does not appear in this run's data")
+    for d in ctx.get("decisions_applied") or []:
+        if d.get("in_plain_words"):
+            amt = re.search(r"\$[\d,.]+[MBK]?", d["in_plain_words"]).group(0)
+            if re.search(r"[-−]\s?" + re.escape(amt), body):
+                errs.append(f"describe the decision '{d['name'][:50]}' in plain words (a gain or loss taken out), "
+                            f"not as a negative amount")
     names = [d.name for d in (decisions.items if decisions is not None else [])]
     keywords = {w for n in names for w in re.findall(r"[a-z]{5,}", n.lower())} - {"other", "line", "value", "changes"}
     for sentence in re.split(r"(?<=[.!?])\s+", body):

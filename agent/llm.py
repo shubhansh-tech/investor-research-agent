@@ -77,6 +77,19 @@ class AnthropicLLM:
         )
         return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
 
+    def complete_structured(self, system: str, user: str, schema: dict, name: str, max_tokens: int = 1500) -> dict:
+        """Force the answer through one 'tool' whose input must match `schema`: the API returns it as
+        parsed JSON, so there is no text to repair. The tool does nothing; it is only an answer form."""
+        resp = self.client.messages.create(
+            model=self.model, max_tokens=max_tokens, system=system,
+            messages=[{"role": "user", "content": user}],
+            tools=[{"name": name, "description": "Submit the answer in this exact shape.", "input_schema": schema}],
+            tool_choice={"type": "tool", "name": name})
+        for b in resp.content:
+            if getattr(b, "type", "") == "tool_use" and b.name == name:
+                return dict(b.input)
+        raise LLMError("model did not return the structured answer")
+
     def search_news(self, system: str, user: str, allowed_domains: list[str], max_uses: int = 3,
                     max_tokens: int = 3000) -> tuple[dict, list[dict], int]:
         """Anthropic's server-side web search, limited by the API to allowed_domains.
@@ -172,6 +185,9 @@ class MockLLM:
 
     def complete_text(self, system: str, user: str, max_tokens: int = 800) -> str:
         return "Mock answer: the model is not connected in this run."
+
+    def complete_structured(self, system: str, user: str, schema: dict, name: str, max_tokens: int = 1500) -> dict:
+        return self.complete_json(system, user, max_tokens)
 
     def search_news(self, system: str, user: str, allowed_domains: list[str], max_uses: int = 3,
                     max_tokens: int = 3000) -> tuple[dict, list[dict], int]:
