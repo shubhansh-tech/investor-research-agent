@@ -114,6 +114,10 @@ class _CountingLLM:
         self._tick()
         return self.inner.complete_text(*a, **k)
 
+    def search_news(self, *a, **k):
+        self._tick()
+        return self.inner.search_news(*a, **k)
+
 
 def llm_or_none():
     try:

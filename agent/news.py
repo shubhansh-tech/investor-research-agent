@@ -1,7 +1,7 @@
 """News items and the deterministic safety detectors.
 
 Test mode: read invented articles from <TICKER>/synthetic-news_TEST_only/.
-Daily use (MVP): live news search is post-MVP; the agent reads EDGAR event filings
+Daily use: live news from approved sites (see news_search.py) plus EDGAR event filings
 (other 8-Ks, Form 4s, late-filing notices) found by the new-filing check.
 
 The keyword detectors below are a safety net that does not depend on the AI: if an
