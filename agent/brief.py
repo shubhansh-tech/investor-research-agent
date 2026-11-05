@@ -121,7 +121,8 @@ def build_context(row, provisional_status: str, baseline: dict | None, decisions
                                                if baseline.get("owner_earnings_yield") is not None else None)}
                      if baseline else None),
         "review_first": row.review_first, "missing": row.missing,
-        "news": [{k: n.get(k) for k in ("id", "date", "source", "title", "impact", "causal_path", "fact_or_inference")}
+        "news": [{**{k: n.get(k) for k in ("id", "date", "source", "title", "impact", "causal_path",
+                                             "fact_or_inference")}, "summary": (n.get("text") or "")[:300]}
                  for n in row.news],
         "one_time_items": row.one_time_items, "decisions_applied": applied, "thesis_note": thesis,
     }

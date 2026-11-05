@@ -24,6 +24,7 @@ from .decisions import load as load_decisions
 from .calc import Calculator, Mapping, Metric, balance_check, fmt_money, pct
 from .filings import (FilingRow, edgar_list_live, edgar_list_snapshot, find_new_filings, load_filings,
                       read_filing_list, select_ttm, ticker_mismatches)
+from . import news_search
 from .news import (NewsItem, detect_injection, detect_material, event_filing_flags, event_filings_as_news,
                    load_synthetic_news)
 from .prompts import SYSTEM, build_user_prompt
@@ -240,9 +241,26 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     if test_mode:
         news, probs = load_synthetic_news(tdir)
         row.missing += probs
+    elif llm is None:
+        news = []                                    # the run stops below: no model configured
     else:
-        news = []
-        tr("Live news search is post-MVP; reading EDGAR event filings only")
+        company = next((f.registrant for f in filings if getattr(f, "registrant", None)), None)
+        try:
+            news, dropped, injected, used = news_search.search_news(llm, ticker, company, as_of)
+        except Exception as e:  # noqa: BLE001
+            row.missing.append(f"news search failed ({e}); rerun when the news search is reachable")
+            tr("Live news search failed; stopped (a failed fetch is never replaced by invented data)")
+            return finish()
+        row.live_calls.append(f"news search: {used} search(es), approved sites only")
+        tr(f"Live news search ({getattr(llm, 'name', '')}): {used} search(es) on approved sites, "
+           f"{len(news)} item(s) kept, {len(dropped)} dropped")
+        for d in dropped:
+            tr(f"News item dropped by code check: {d}")
+        for i, q in enumerate(injected):
+            row.embedded_instructions.append({"id": f"search-{i + 1}", "quote": q, "by": "news search"})
+        if news:
+            row.checks.append(f"News: {len(news)} item(s) from the last {news_search.DAYS} days; every link was "
+                              "returned by the search and is on the approved-sources list")
     news += event_filings_as_news(new.news_filings)
     for r in new.news_filings:
         for flag in event_filing_flags(r):
