@@ -77,6 +77,36 @@ class AnthropicLLM:
         )
         return "".join(b.text for b in resp.content if getattr(b, "type", "") == "text").strip()
 
+    def search_news(self, system: str, user: str, allowed_domains: list[str], max_uses: int = 3,
+                    max_tokens: int = 3000) -> tuple[dict, list[dict], int]:
+        """Anthropic's server-side web search, limited by the API to allowed_domains.
+        Returns (JSON answer, every search result the API returned, searches used).
+        The model's only tool here is web search: it cannot act on anything."""
+        tool = {"type": "web_search_20250305", "name": "web_search", "max_uses": max_uses,
+                "allowed_domains": allowed_domains}
+        messages = [{"role": "user", "content": user}]
+        results, texts, used = [], [], 0
+        for _ in range(3):        # a long search turn may pause; continue it at most twice
+            resp = self.client.messages.create(model=self.model, max_tokens=max_tokens, system=system,
+                                               messages=messages, tools=[tool])
+            usage = getattr(getattr(resp, "usage", None), "server_tool_use", None)
+            used += int(getattr(usage, "web_search_requests", 0) or 0)
+            for b in resp.content:
+                kind = getattr(b, "type", "")
+                if kind == "text":
+                    texts.append(b.text)
+                elif kind == "web_search_tool_result":
+                    content = getattr(b, "content", None)
+                    if isinstance(content, list):
+                        results += [{"url": r.url, "title": getattr(r, "title", ""),
+                                     "page_age": getattr(r, "page_age", None)} for r in content]
+                    elif content is not None and getattr(content, "error_code", None):
+                        raise LLMError(f"news search failed: {content.error_code}")
+            if getattr(resp, "stop_reason", "") != "pause_turn":
+                break
+            messages = messages + [{"role": "assistant", "content": resp.content}]
+        return _extract_json("".join(texts)), results, used
+
 
 class MockLLM:
     """Deterministic offline stand-in. Picks obvious line items and writes a
@@ -127,6 +157,11 @@ class MockLLM:
 
     def complete_text(self, system: str, user: str, max_tokens: int = 800) -> str:
         return "Mock answer: the model is not connected in this run."
+
+    def search_news(self, system: str, user: str, allowed_domains: list[str], max_uses: int = 3,
+                    max_tokens: int = 3000) -> tuple[dict, list[dict], int]:
+        """The mock never reaches the internet: no live news, zero searches."""
+        return {"items": [], "embedded_instructions": []}, [], 0
 
 
 def get_llm(use_mock: bool = False, api_key: str | None = None):
