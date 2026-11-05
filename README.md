@@ -3,7 +3,7 @@
 A bounded, tool-using research agent for a self-directed investor. Before the market
 opens it checks SEC EDGAR for new filings, computes trailing-twelve-month **ROE** and
 **Owner Earnings Yield** with a citation for every input, labels material news, and
-writes a cited brief of under 200 words. The investor reviews one row per ticker and
+writes a cited brief (at most 200 words, plus up to 5 news items in at most 200 words). The investor reviews one row per ticker and
 approves, rejects, asks or cancels. **It produces research only: no trade, order,
 brokerage or messaging tool exists in this codebase.**
 
