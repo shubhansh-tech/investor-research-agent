@@ -405,8 +405,9 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     final = None
     for attempt in (1, 2):
         try:
-            bout = llm.complete_json(brief_mod.BRIEF_SYSTEM, brief_mod.build_prompt(bctx, berrs if attempt == 2 else None),
-                                     max_tokens=1200)
+            bout = llm.complete_structured(brief_mod.BRIEF_SYSTEM,
+                                           brief_mod.build_prompt(bctx, berrs if attempt == 2 else None),
+                                           brief_mod.BRIEF_SCHEMA, "write_brief", max_tokens=1200)
             cand = brief_mod.parse(bout, head)
             berrs = brief_mod.check_brief(cand, row, decisions, bctx, [e["quote"] for e in row.embedded_instructions])
         except Exception as e:  # noqa: BLE001
