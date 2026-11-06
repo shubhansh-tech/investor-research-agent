@@ -59,7 +59,7 @@ st.markdown("""<style>
 # ================================================================ sidebar
 with st.sidebar:
     st.header("Run settings")
-    test_mode = st.checkbox("Test mode", value=True,
+    test_mode = st.checkbox("Test mode", value=False,
                             help="Uses saved EDGAR filing lists and synthetic news only. Never calls live sources. Rows are labelled TEST MODE.")
     scenario = None
     if test_mode:
@@ -218,15 +218,25 @@ tab_run, tab_evals, tab_how = st.tabs(["Research", "Evals", "How it works"])
 with tab_run:
     c1, c2 = st.columns([2, 3])
     with c1:
-        tick_txt = st.text_input("Tickers (1 to 5, comma-separated)", value="CB")
+        # Test mode starts with the golden ticker and the test-date price; daily use starts empty, so a
+        # real morning never runs on yesterday's example values by accident. The mode is part of each
+        # field's key, so switching mode resets the fields to that mode's starting values.
+        mode = "test" if test_mode else "live"
+        tick_txt = st.text_input("Tickers (1 to 5, comma-separated)", value="CB" if test_mode else "",
+                                 placeholder="e.g. CB, QUBT", key=f"tickers_{mode}")
     tickers = [t.strip().upper() for t in tick_txt.split(",") if t.strip()][:5]
     with c2:
         pcols = st.columns(max(1, len(tickers)))
         prices = {}
         for i, t in enumerate(tickers):
-            prices[t] = pcols[i].number_input(f"{t} price ($)", min_value=0.0, value=float(SPEC["prices"].get(t, 0.0)),
-                                              step=0.01, format="%.2f", key=f"price_{t}")
-    if st.button("Run research", type="primary"):
+            start = float(SPEC["prices"][t]) if test_mode and t in SPEC["prices"] else None
+            prices[t] = pcols[i].number_input(f"{t} price ($)", min_value=0.0, value=start, step=0.01, format="%.2f",
+                                              placeholder="today's / target", key=f"price_{mode}_{t}",
+                                              help="Today's price, or a price you want to test the yield at.")
+    missing_input = ("Enter at least one ticker." if not tickers else
+                     "Enter a price for " + ", ".join(t for t in tickers if not prices.get(t)) + "."
+                     if any(not prices.get(t) for t in tickers) else None)
+    if st.button("Run research", type="primary", disabled=missing_input is not None, help=missing_input):
         llm = llm_or_none()
         new_rows = []
         with st.spinner("Checking filings, reading news, computing metrics..."):
@@ -239,7 +249,7 @@ with tab_run:
                     t = used_t
                 else:
                     root = WS / "data"
-                row = run_research(t, prices.get(t) or prices.get(tickers[0]), root, test_mode=test_mode,
+                row = run_research(t, prices[t if t in prices else tickers[0]], root, test_mode=test_mode,
                                    as_of=TEST_AS_OF if test_mode else C.today_et(), llm=llm, ledger_root=LEDGER)
                 new_rows.append({"row": row, "root": root, "decision": None, "answer": None, "feedback": None})
         st.session_state.rows = new_rows
