@@ -315,18 +315,33 @@ with tab_run:
         if item.get("answer"):
             st.markdown(f"**Answer** (brief unchanged): {esc(item['answer'])}")
 
-    # ---- the log
-    logs = sorted(LEDGER.glob(f"*/{C.ANALYSIS_FILE}"))
-    if logs:
+    # ---- the log: only the tickers on screen. (It used to list every analysis.xlsx in this browser
+    # session, so a TSLA run showed CB's earlier rows as if they were TSLA's.)
+    shown = list(dict.fromkeys(item["row"].ticker for item in st.session_state.rows))
+    if shown:
         st.divider()
         st.subheader("analysis.xlsx (decision log)")
-        for p in logs:
+
+        def show_log(p: Path):
             df = storage.read(p.parent)
             st.caption(f"{p.parent.name}: {len(df)} row(s)")
             st.dataframe(df[["date_time", "ticker", "status", "roe", "owner_earnings_yield", "test_mode",
                              "reviewer_decision", "reviewer_input"]], hide_index=True, width="stretch")
             st.download_button(f"Download {p.parent.name} analysis.xlsx", p.read_bytes(),
                                file_name=f"{p.parent.name}_analysis.xlsx", key=f"dl_{p.parent.name}")
+
+        for t in shown:
+            p = LEDGER / t / C.ANALYSIS_FILE
+            if p.exists():
+                show_log(p)
+            else:
+                st.caption(f"{t}: no rows saved yet. A row is saved only when the ticker has its own folder in "
+                           "the data folder; a run that stops because that folder is missing saves nothing.")
+        others = [p for p in sorted(LEDGER.glob(f"*/{C.ANALYSIS_FILE}")) if p.parent.name not in shown]
+        if others:
+            with st.expander(f"Other tickers run earlier in this session ({', '.join(p.parent.name for p in others)})"):
+                for p in others:
+                    show_log(p)
 
 with tab_evals:
     st.subheader("Evaluation scorecard")
