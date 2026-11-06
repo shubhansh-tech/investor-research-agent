@@ -10,6 +10,7 @@ import json
 import os
 import shutil
 import tempfile
+import time
 from datetime import date
 from pathlib import Path
 
@@ -40,13 +41,54 @@ SPEC = yaml.safe_load((C.REPO_ROOT / "evals" / "cases.yaml").read_text())
 TEST_AS_OF = date.fromisoformat(SPEC["as_of"])
 
 # ---- one private workspace per browser session; the repo's data folder is never written
-if "ws" not in st.session_state:
-    st.session_state.ws = Path(tempfile.mkdtemp(prefix="ira_"))
-    shutil.copytree(C.DEFAULT_DATA_ROOT, st.session_state.ws / "data")
-    (st.session_state.ws / "ledger").mkdir()
+# The workspace is a temporary folder on the hosting server, known only to this browser session.
+# Closing the tab does not delete it, so: (1) every new session deletes workspaces unused for
+# STALE_HOURS, and (2) "Clear my session data" deletes this session's workspace at once.
+STALE_HOURS = 12
+WS_PREFIX = "ira_"
+
+
+def _touch(ws: Path) -> None:
+    try:
+        (ws / ".last_used").touch()
+    except OSError:
+        pass
+
+
+def _clean_stale(keep: Path | None = None) -> int:
+    cutoff = time.time() - STALE_HOURS * 3600
+    removed = 0
+    for d in Path(tempfile.gettempdir()).glob(WS_PREFIX + "*"):
+        # only session workspaces (they hold a ledger/ folder); never the eval checkpoints or eval scratch
+        if not d.is_dir() or d == keep or not (d / "ledger").is_dir():
+            continue
+        marker = d / ".last_used"
+        try:
+            last = (marker if marker.exists() else d).stat().st_mtime
+        except OSError:
+            continue
+        if last < cutoff:
+            shutil.rmtree(d, ignore_errors=True)
+            removed += 1
+    return removed
+
+
+def _new_workspace() -> None:
+    _clean_stale()
+    ws = Path(tempfile.mkdtemp(prefix=WS_PREFIX))
+    shutil.copytree(C.DEFAULT_DATA_ROOT, ws / "data")
+    (ws / "ledger").mkdir()
+    _touch(ws)
+    st.session_state.ws = ws
     st.session_state.rows = []
+    st.session_state.loaded_logs = {}
+
+
+if "ws" not in st.session_state or not Path(st.session_state.ws).is_dir():
+    _new_workspace()
 WS: Path = st.session_state.ws
 LEDGER = WS / "ledger"
+_touch(WS)
 
 STATUS_STYLE = {READY: ("#0F6E56", "#E1F5EE"), REVIEW_FIRST: ("#854F0B", "#FAEEDA"), NEEDS_INFO: ("#A32D2D", "#FCEBEB")}
 
@@ -90,6 +132,31 @@ with st.sidebar:
     st.session_state.setdefault("model_calls", 0)
     if unlocked:
         st.caption(f"Real-model runs this session: {st.session_state.model_calls} of {cap}")
+    st.divider()
+    # ---- your saved decision log: lets an approved baseline survive between sessions
+    st.subheader("Your decision log")
+    ups = st.file_uploader("Load a saved analysis.xlsx", type=["xlsx"], accept_multiple_files=True,
+                           help="Downloaded earlier from the decision log. Used only in this session, so your last "
+                                "approved run becomes the baseline. Test-mode approvals never serve as a daily baseline.")
+    for up in ups or []:
+        key = f"{up.name}:{up.size}"
+        if key in st.session_state.loaded_logs:
+            continue
+        msg = storage.load_upload(LEDGER, up.getvalue())
+        st.session_state.loaded_logs[key] = msg
+    for key, msg in st.session_state.loaded_logs.items():
+        (st.error if msg.startswith("Not loaded") else st.caption)(f"{key.split(':')[0]}: {msg}")
+    if st.button("Clear my session data",
+                 help="Deletes this session's workspace on the server now: decision logs (including uploaded ones), "
+                      "results and test scenarios. Files you downloaded are not affected. The real-model call "
+                      "count for this session is kept."):
+        shutil.rmtree(WS, ignore_errors=True)
+        _new_workspace()
+        st.session_state.cleared = True
+        st.rerun()
+    if st.session_state.pop("cleared", False):
+        st.success("Session data cleared from the server.")
+    st.caption(f"Your session's files are deleted from the server after {STALE_HOURS} hours unused.")
     st.divider()
     st.caption("Research only. No trade, order, brokerage or messaging tool exists in this app.")
     st.caption(version_label() + " · matches the commit ID on GitHub")
