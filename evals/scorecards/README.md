@@ -30,3 +30,5 @@ Batch 2a versus batch 1:
   where batch 1 varied between 9.91% and 10.87%: decided lines override the model's choices, and
   the depreciation estimate is always added back when depreciation is not disclosed.
 - Runs needing a retry: 12 to 0 of 27; median run time: 24.5 s to 16.4 s.
+
+Commit IDs from 2026-11-05 08:58 onward changed on 2026-11-07 (author fix); see `docs/COMMIT_ID_MAP.md` (for example `a64ab44` is now listed there). The scorecard files keep the ID that was live when they ran.
