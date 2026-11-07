@@ -51,7 +51,7 @@ class SetupGuide:
 
     def summary(self) -> str:
         return (f"{self.ticker} is not set up yet. Save the {len(self.required)} filing(s) listed under "
-                f"'First-time setup for {self.ticker}' and the two fetch logs, then run again.")
+                f"'First-time setup required for {self.ticker}' and the two fetch logs, then run again.")
 
 
 def _get(url: str, log: list | None):

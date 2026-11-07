@@ -290,7 +290,7 @@ FOCUS_JS = """<script>
 
 def show_setup_guide(g) -> None:
     """First-time setup for a ticker: exactly what to save, with direct links (built by code from EDGAR)."""
-    st.markdown(f"#### First-time setup for {g.ticker}: {esc(g.company)} (SEC CIK {g.cik})")
+    st.markdown(f"#### First-time setup required for {g.ticker}: {esc(g.company)} (SEC CIK {g.cik})")
     st.markdown("**1. Save these filings** into a folder named "
                 f"`{g.ticker}/filings/`. Open each link, then save the page as HTML "
                 "(Chrome: right-click → *Save as* → *Webpage, HTML only*; Safari: *File → Save As* → *Page Source*). "
