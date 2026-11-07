@@ -103,10 +103,10 @@ st.markdown("""<style>
 
 # ================================================================ sidebar
 with st.sidebar:
-    # Collapsible, and closed by default. The label stays fixed (a changing label would re-close the panel on
+    # Collapsible, open by default (owner's choice). The label stays fixed (a changing label would re-close the panel on
     # every click); the current mode is shown in one line under it instead.
     status_line = st.empty()
-    settings = st.expander("Run settings", expanded=False)
+    settings = st.expander("Run settings", expanded=True)
 with settings:
     test_mode = st.checkbox("Test mode", value=False,
                             help="Uses saved EDGAR filing lists and synthetic news only. Never calls live sources. Rows are labelled TEST MODE.")
@@ -123,7 +123,7 @@ with settings:
     passcode = os.getenv("APP_PASSCODE", "")
     unlocked = False
     if has_key:
-        entered = st.text_input("Owner passcode (enables the real AI model)", type="password",
+        entered = st.text_input(":red[Owner passcode (enables the real AI model)]", type="password",
                                 help="Visitors can use the app with the offline mock model and see saved scorecards. "
                                      "Real AI calls are billed to the owner, so they need the passcode.")
         unlocked = bool(passcode) and entered == passcode
