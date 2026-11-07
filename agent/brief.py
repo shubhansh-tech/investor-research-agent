@@ -47,12 +47,13 @@ Plain sentences, no markdown."""
 
 _ITEMS = {"type": "array", "items": {"type": "object", "properties": {
     "text": {"type": "string"}, "basis": {"type": "string", "enum": ["fact", "inference"]}},
-    "required": ["text", "basis"]}}
-# The brief is returned through a "tool" whose input must match this shape, so the API always hands
-# back well-formed JSON (no missing commas or stray quotes to repair).
+    "required": ["text", "basis"], "additionalProperties": False}}
+# Structured output: the API constrains the brief to this shape, so it always comes back as valid
+# JSON (no missing commas or stray quotes to repair).
 BRIEF_SCHEMA = {"type": "object", "properties": {
     "what_changed": _ITEMS, "news": _ITEMS, "check": _ITEMS,
-    "thesis_check": {"type": ["string", "null"]}}, "required": ["what_changed", "news", "check"]}
+    "thesis_check": {"type": ["string", "null"]}},
+    "required": ["what_changed", "news", "check", "thesis_check"], "additionalProperties": False}
 
 
 @dataclass
