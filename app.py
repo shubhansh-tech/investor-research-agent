@@ -7,6 +7,7 @@ no trade, order or brokerage tool exists anywhere in this codebase.
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import tempfile
@@ -162,6 +163,121 @@ with st.sidebar:
     st.caption(version_label() + " · matches the commit ID on GitHub")
 
 
+TICKERS_LABEL = "Tickers (1 to 5, comma-separated)"
+TICKER_RE = re.compile(r"[A-Z][A-Z0-9.\-]{0,9}")
+
+
+def parse_tickers(text: str) -> tuple[list[str], str | None]:
+    """Upper-case, drop blanks and repeats, keep the first 5. Returns (tickers, note for the screen)."""
+    seen: list[str] = []
+    for part in (text or "").replace(";", ",").split(","):
+        t = part.strip().upper()
+        if t and t not in seen:
+            seen.append(t)
+    note = f"Only the first 5 tickers are used ({', '.join(seen[5:])} left out)." if len(seen) > 5 else None
+    return seen[:5], note
+
+
+def price_label(t: str) -> str:
+    return f"{t} price ($)"
+
+
+def parse_price(raw: str) -> tuple[float | None, str | None]:
+    """Accepts 357.37, $357.37 or 1,234.50. Returns (price, error)."""
+    s = (raw or "").strip().replace("$", "").replace(",", "")
+    if not s:
+        return None, None
+    try:
+        v = float(s)
+    except ValueError:
+        return None, "Not a number."
+    if not (0 < v < 1_000_000):
+        return None, "Must be more than 0."
+    return round(v, 4), None
+
+
+def focus_next(mode: str, tickers: list[str], raw: dict, prices: dict, ready: bool) -> None:
+    """Move the cursor the way a keyboard user expects, because Streamlit rebuilds the form after each
+    entry and the cursor is lost:
+      * after the tickers change: to the first price box that is empty or invalid (else the first one),
+      * after a price changes: back to it if invalid, else to the next price box,
+      * after the last price: to Run research (or, if a price is still missing, to that box).
+    It acts only right after a forward Tab or Enter, never after a mouse click or Shift+Tab, so it
+    does not pull the cursor away from where the user chose to go."""
+    st.html(LISTEN_JS, unsafe_allow_javascript=True)
+    prev = st.session_state.get("_form_prev")
+    st.session_state["_form_prev"] = (mode, tuple(tickers), dict(raw))
+    if not prev or prev[0] != mode or not tickers:
+        return
+    _, prev_tickers, prev_raw = prev
+    first_open = next((t for t in tickers if prices.get(t) is None), None)
+    target, source = None, TICKERS_LABEL
+    if tuple(tickers) != prev_tickers:
+        target = ("input", price_label(first_open or tickers[0]))
+    else:
+        changed = [t for t in tickers if raw.get(t, "") != prev_raw.get(t, "")]
+        if changed:
+            # Fast typing can deliver several changed boxes in one refresh: the last one is where the user just was.
+            t = changed[-1]
+            i = tickers.index(t)
+            source = price_label(t)
+            if raw.get(t, "").strip() and prices.get(t) is None:
+                target = ("input", price_label(t))                      # invalid: stay and fix it
+            elif i + 1 < len(tickers):
+                target = ("input", price_label(tickers[i + 1]))         # the next price box
+            elif ready:
+                target = ("button", "Run research")
+            elif first_open:
+                target = ("input", price_label(first_open))             # a price is still missing
+    if not target:
+        return
+    st.session_state["_focus_n"] = st.session_state.get("_focus_n", 0) + 1
+    st.html(FOCUS_JS.replace("__KIND__", target[0]).replace("__LABEL__", json.dumps(target[1]))
+            .replace("__SOURCE__", json.dumps(source))
+            .replace("__N__", str(st.session_state["_focus_n"])), unsafe_allow_javascript=True)
+
+
+# Loaded with the page (before the first key press), so the agent knows whether the user just pressed
+# Tab/Enter or clicked with the mouse.
+LISTEN_JS = """<script>
+(function () {
+  const W = window, D = document;
+  if (W.__iraFocus) return;
+  W.__iraFocus = {key: null, shift: false, t: 0, ptr: 0};
+  D.addEventListener("keydown", e => {
+    if (e.key === "Tab" || e.key === "Enter") {
+      Object.assign(W.__iraFocus, {key: e.key, shift: e.shiftKey, t: Date.now(),
+                                   from: (e.target && e.target.getAttribute && e.target.getAttribute("aria-label")) || ""});
+    }
+  }, true);
+  D.addEventListener("pointerdown", () => { W.__iraFocus.ptr = Date.now(); }, true);
+})();
+</script>"""
+
+FOCUS_JS = """<script>
+(function () {
+  const W = window, D = document, n = __N__;
+  const f = W.__iraFocus;
+  // Each instruction is numbered; an older one that the page re-runs while redrawing is ignored.
+  if (!f || n <= (f.lastN || 0)) return;
+  f.lastN = n;
+  // Act only if the user's last Tab/Enter left the box that triggered this move. If they have
+  // already typed on into another box (fast typing), a late instruction must not pull them back.
+  if (f.from !== __SOURCE__) return;
+  if (!f.key || f.shift || Date.now() - f.t > 8000 || f.ptr > f.t) return;
+  const kind = "__KIND__", label = __LABEL__;
+  let tries = 0;
+  (function go() {
+    let el = null;
+    if (kind === "input") { el = D.querySelector('input[aria-label="' + CSS.escape(label) + '"]'); }
+    else { el = Array.from(D.querySelectorAll("button")).find(b => b.innerText.trim() === label && !b.disabled); }
+    if (el) { el.focus(); if (el.select) el.select(); f.key = null; return; }
+    if (++tries < 60) setTimeout(go, 50);
+  })();
+})();
+</script>"""
+
+
 class _CountingLLM:
     """Wraps the real model so every call counts toward the per-session cap."""
 
@@ -289,20 +405,29 @@ with tab_run:
         # real morning never runs on yesterday's example values by accident. The mode is part of each
         # field's key, so switching mode resets the fields to that mode's starting values.
         mode = "test" if test_mode else "live"
-        tick_txt = st.text_input("Tickers (1 to 5, comma-separated)", value="CB" if test_mode else "",
+        tick_txt = st.text_input(TICKERS_LABEL, value="CB" if test_mode else "",
                                  placeholder="e.g. CB, QUBT", key=f"tickers_{mode}")
-    tickers = [t.strip().upper() for t in tick_txt.split(",") if t.strip()][:5]
+    tickers, ticker_note = parse_tickers(tick_txt)
+    if ticker_note:
+        st.caption(ticker_note)
     with c2:
         pcols = st.columns(max(1, len(tickers)))
-        prices = {}
+        prices, raw_prices, price_errors = {}, {}, {}
         for i, t in enumerate(tickers):
-            start = float(SPEC["prices"][t]) if test_mode and t in SPEC["prices"] else None
-            prices[t] = pcols[i].number_input(f"{t} price ($)", min_value=0.0, value=start, step=0.01, format="%.2f",
-                                              placeholder="today's / target", key=f"price_{mode}_{t}",
-                                              help="Today's price, or a price you want to test the yield at.")
+            # A plain text box, not a number box: number boxes carry -/+ buttons that the Tab key stops on.
+            start = f"{SPEC['prices'][t]:.2f}" if test_mode and t in SPEC["prices"] else ""
+            raw = pcols[i].text_input(price_label(t), value=start, placeholder="today's / target", key=f"price_{mode}_{t}")
+            raw_prices[t] = raw
+            prices[t], err = parse_price(raw)
+            if err:
+                price_errors[t] = err
+                pcols[i].caption(f":red[{err}]")
+    bad_tickers = [t for t in tickers if not TICKER_RE.fullmatch(t)]
     missing_input = ("Enter at least one ticker." if not tickers else
-                     "Enter a price for " + ", ".join(t for t in tickers if not prices.get(t)) + "."
-                     if any(not prices.get(t) for t in tickers) else None)
+                     f"Not a valid ticker: {', '.join(bad_tickers)}." if bad_tickers else
+                     "Enter a valid price for " + ", ".join(t for t in tickers if prices.get(t) is None) + "."
+                     if any(prices.get(t) is None for t in tickers) else None)
+    focus_next(mode, tickers, raw_prices, prices, ready=missing_input is None)
     if st.button("Run research", type="primary", disabled=missing_input is not None, help=missing_input):
         llm = llm_or_none()
         new_rows = []
