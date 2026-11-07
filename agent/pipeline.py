@@ -24,7 +24,7 @@ from .decisions import load as load_decisions
 from .calc import Calculator, Mapping, Metric, balance_check, fmt_money, pct
 from .filings import (FilingRow, edgar_list_live, edgar_list_snapshot, find_new_filings, load_filings,
                       read_filing_list, select_ttm, ticker_mismatches)
-from . import news_search
+from . import news_search, onboarding
 from .news import (NewsItem, detect_injection, detect_material, event_filing_flags, event_filings_as_news,
                    load_synthetic_news)
 from .prompts import SYSTEM, build_user_prompt
@@ -53,6 +53,7 @@ class ReviewRow:
     embedded_instructions: list[dict] = field(default_factory=list)
     brief: str = ""
     brief_obj: object = None             # agent.brief.Brief (headline + sections) once written
+    setup_guide: object = None           # onboarding.SetupGuide when the ticker has no folder yet
     thesis_check: str | None = None
     checks: list[str] = field(default_factory=list)          # passed checks (shown to reviewer)
     ttm_mode: str = ""
@@ -186,6 +187,19 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     miss = preflight(root, ticker, test_mode)
     tr(f"Preflight: {'all required folders and files present' if not miss else str(len(miss)) + ' item(s) missing'}")
     if miss:
+        if not (root / ticker).is_dir() and not test_mode:
+            # First time for this ticker: look it up on EDGAR and list exactly what to save, with links.
+            try:
+                row.setup_guide = onboarding.build_guide(ticker, as_of, row.live_calls)
+                tr(f"First-time setup guide built from live EDGAR for {row.setup_guide.company}")
+                row.missing.append(row.setup_guide.summary())
+                row.missing += row.setup_guide.problems
+                return finish(False)
+            except ValueError as e:                  # e.g. the ticker is not on EDGAR
+                row.missing.append(str(e))
+                return finish(False)
+            except Exception as e:  # noqa: BLE001  # EDGAR unreachable: fall back to the generic list
+                tr(f"First-time setup guide not available ({e}); showing the generic list")
         row.missing += miss
         return finish(False)
     tdir = root / ticker

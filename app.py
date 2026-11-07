@@ -278,6 +278,34 @@ FOCUS_JS = """<script>
 </script>"""
 
 
+def show_setup_guide(g) -> None:
+    """First-time setup for a ticker: exactly what to save, with direct links (built by code from EDGAR)."""
+    st.markdown(f"#### First-time setup for {g.ticker}: {esc(g.company)} (SEC CIK {g.cik})")
+    st.markdown("**1. Save these filings** into a folder named "
+                f"`{g.ticker}/filings/`. Open each link, then save the page as HTML "
+                "(Chrome: right-click → *Save as* → *Webpage, HTML only*; Safari: *File → Save As* → *Page Source*). "
+                "Keep the file name shown.")
+    st.markdown("\n".join(f"- **{d.form}** filed {d.filed} · {esc(d.role)}  \n"
+                           f"  [{d.file_name}]({d.doc_url}) · [EDGAR index page]({d.index_url}) · accession {d.accession}"
+                           for d in g.required))
+    st.markdown(f"**2. Save the two fetch logs** into `{g.ticker}/`. They list what is on EDGAR today, in the same "
+                "layout as an EDGAR export. From the next run on, any newer required filing is asked for by name, "
+                "with its link.")
+    c1, c2 = st.columns(2)
+    c1.download_button(f"Download {C.FETCH_LOG_10KQ}", g.log_10kq, file_name=C.FETCH_LOG_10KQ,
+                       key=f"setup_kq_{g.ticker}")
+    c2.download_button(f"Download {C.FETCH_LOG_8K}", g.log_8k, file_name=C.FETCH_LOG_8K, key=f"setup_8k_{g.ticker}")
+    st.markdown(f"**3. Optional: `{g.ticker}/assumptions.md`** with maintenance capex and any standing decisions "
+                "(see CB or QUBT for the format). Without it the agent still runs and flags one-time items for review.")
+    if g.optional_history:
+        with st.expander(f"Optional: earlier 10-Ks for 5-year history ({g.ticker}/history/), only if a standing "
+                         "decision averages over 5 years"):
+            st.markdown("\n".join(f"- **{d.form}** filed {d.filed} · {esc(d.role)} · [{d.file_name}]({d.doc_url})"
+                                   for d in g.optional_history))
+    st.caption("4. Send the files to Claude in the project chat, or upload them to the repo's "
+               f"`data/{g.ticker}/` folder on GitHub; the hosted app reads its data folder from the repo.")
+
+
 class _CountingLLM:
     """Wraps the real model so every call counts toward the per-session cap."""
 
@@ -458,6 +486,8 @@ with tab_run:
             st.warning("**REVIEW FIRST**\n\n" + "\n".join(f"- {esc(r)}" for r in row.review_first))
         if row.missing:
             st.error("**Needs information** (metric withheld, nothing estimated)\n\n" + "\n".join(f"- {esc(m)}" for m in row.missing))
+        if row.setup_guide is not None:
+            show_setup_guide(row.setup_guide)
         if row.roe is not None or row.oey is not None:
             mc1, mc2 = st.columns(2)
             metric_block(mc1, row.roe, row.baseline_roe)
