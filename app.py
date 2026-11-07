@@ -97,11 +97,17 @@ st.markdown("""<style>
 .badge{display:inline-block;padding:3px 10px;border-radius:6px;font-weight:600;font-size:0.85rem;margin-right:8px}
 .small{color:#6b6b6b;font-size:0.85rem}
 .notrade{padding:8px 12px;border-radius:6px;background:#E1F5EE;color:#085041;font-weight:600}
+/* Less empty space above the title: the gap below the top bar is cut by about 60% (owner's request). */
+[data-testid="stMainBlockContainer"], .block-container{padding-top:3.3rem}
 </style>""", unsafe_allow_html=True)
 
 # ================================================================ sidebar
 with st.sidebar:
-    st.header("Run settings")
+    # Collapsible, and closed by default. The label stays fixed (a changing label would re-close the panel on
+    # every click); the current mode is shown in one line under it instead.
+    status_line = st.empty()
+    settings = st.expander("Run settings", expanded=False)
+with settings:
     test_mode = st.checkbox("Test mode", value=False,
                             help="Uses saved EDGAR filing lists and synthetic news only. Never calls live sources. Rows are labelled TEST MODE.")
     scenario = None
@@ -133,6 +139,10 @@ with st.sidebar:
     st.session_state.setdefault("model_calls", 0)
     if unlocked:
         st.caption(f"Real-model runs this session: {st.session_state.model_calls} of {cap}")
+status_line.caption(("**Test mode**" if test_mode else "**Daily use**") + " · "
+                    + ("Real AI model" if not use_mock else ("Mock model (no AI)" if unlocked else "Demo mode (no AI cost)"))
+                    + (f" · {scenario['id']}" if test_mode and scenario else ""))
+with st.sidebar:
     st.divider()
     # ---- your saved decision log: lets an approved baseline survive between sessions
     st.subheader("Your decision log")

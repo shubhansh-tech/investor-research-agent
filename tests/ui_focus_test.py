@@ -73,6 +73,7 @@ with sync_playwright() as p:
     b.close()
     # L: test mode -> prefilled, and switching mode does not grab the cursor
     b, page = fresh(p)
+    page.get_by_text("Run settings").click(); time.sleep(1)   # the settings panel starts collapsed
     page.get_by_text("Test mode", exact=True).click(); time.sleep(2.5)
     ok = price(page, "CB").input_value() == "357.37" and not (focused(page) or "").startswith("input:CB")
     check("L. test mode prefilled CB 357.37, no cursor jump on mode switch", ok, page)
