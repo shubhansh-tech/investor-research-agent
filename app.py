@@ -28,7 +28,8 @@ from agent.prompts import ASK_SYSTEM
 from agent.version import label as version_label
 from evals.scenarios import build as build_scenario
 
-st.set_page_config(page_title="Pre-market Research Agent", page_icon="📈", layout="wide")
+st.set_page_config(page_title="Pre-market Research Agent", page_icon="📈", layout="wide",
+                   initial_sidebar_state="expanded")   # always open on load, including after the app wakes from sleep
 
 # ---- secrets -> environment (never hard-coded)
 for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "SEC_USER_AGENT", "APP_PASSCODE", "MAX_MODEL_CALLS_PER_SESSION"):
