@@ -54,6 +54,7 @@ class ReviewRow:
     brief: str = ""
     brief_obj: object = None             # agent.brief.Brief (headline + sections) once written
     setup_guide: object = None           # onboarding.SetupGuide when the ticker has no folder yet
+    new_filings: list = field(default_factory=list)   # FilingRow items on EDGAR not yet saved
     thesis_check: str | None = None
     checks: list[str] = field(default_factory=list)          # passed checks (shown to reviewer)
     ttm_mode: str = ""
@@ -230,6 +231,7 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
         return finish()
     new = find_new_filings(edgar, log_kq, log_8k, as_of)
     if new.must_download:
+        row.new_filings = list(new.must_download)
         for r in new.must_download:
             row.missing.append(f"download new filing {r.form} filed {r.filing_date} (accession {r.accession}) "
                                f"and add it to your fetch log: {r.url}")

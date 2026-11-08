@@ -20,7 +20,8 @@ import streamlit as st
 import yaml
 
 from agent import config as C
-from agent import storage
+from agent import decisions as decisions_mod
+from agent import setup_status, storage
 from agent.calc import fmt_money, pct
 from agent.llm import LLMError, get_llm
 from agent.pipeline import NEEDS_INFO, READY, REVIEW_FIRST, run_research
@@ -289,6 +290,89 @@ FOCUS_JS = """<script>
 </script>"""
 
 
+def go_to_setup(ticker: str) -> None:
+    """Button callback: open the setup tab with this ticker's section first and expanded."""
+    st.session_state["main_tab"] = SETUP_TAB
+    st.session_state["setup_focus"] = ticker
+
+
+def _latest_rows_by_ticker() -> dict:
+    out = {}
+    for item in st.session_state.get("rows", []):
+        r = item["row"]
+        if not r.test_mode:
+            out[r.ticker] = r
+    return out
+
+
+STEP_ICON = {setup_status.DONE: "✅", setup_status.ACTION: "🔴", setup_status.LOCKED: "🔒", setup_status.OPTIONAL: "◻️"}
+
+
+def render_setup_tab() -> None:
+    root = WS / "data"
+    if test_mode:
+        st.info("Setup works in **daily use** (Test mode unchecked). Test mode uses fixed saved data so the "
+                "45-run evaluation stays repeatable. You can still view each ticker's files below.")
+    latest = _latest_rows_by_ticker()
+    focus = st.session_state.get("setup_focus")
+    tickers = setup_status.list_tickers(root, extra=[t for t, r in latest.items() if r.setup_guide is not None]
+                                        + ([focus] if focus else []))
+    if focus in tickers:
+        tickers.remove(focus)
+        tickers.insert(0, focus)
+    st.caption("One section per ticker. Only the next thing to do is red and open; finished steps close with ✅.")
+    for t in tickers:
+        r = latest.get(t)
+        s = setup_status.ticker_status(root, t, C.today_et(), r.new_filings if r else None)
+        open_it = (t == focus) or (s.next_step is not None and focus is None) or bool(s.new_filings)
+        with st.expander(s.headline, expanded=open_it):
+            for step in s.steps:
+                label = f"{STEP_ICON[step.state]} Step {step.n} · {setup_status.STEP_NAMES[step.n]}: {step.detail}"
+                st.markdown(f":red[**{label}**]" if step.state == setup_status.ACTION else label)
+            if s.new_filings:
+                st.markdown("**New filing(s) on EDGAR, not yet saved:**\n" + "\n".join(
+                    f"- {f.form} filed {f.filing_date} · [EDGAR index page]({f.url})" for f in s.new_filings))
+            st.caption("Action buttons for each step arrive in the next build.")
+            show_ticker_files(root, t)
+    with st.expander("📄 View agent rules (research_rules.md, all tickers)", expanded=False):
+        rp = root / C.RULES_FILE
+        st.markdown(rp.read_text() if rp.exists() else "_No rules file found._")
+
+
+def show_ticker_files(root: Path, t: str) -> None:
+    """Read-only views: opening them never changes anything."""
+    tdir = root / t
+    if not tdir.is_dir():
+        return
+    with st.expander(f"📄 View files for {t} (read-only)", expanded=False):
+        a = tdir / "assumptions.md"
+        st.markdown("**assumptions.md**")
+        if a.exists():
+            d = decisions_mod.load(tdir)
+            if d.items:
+                st.markdown("What the agent understood:\n" + "\n".join(
+                    f"- **{esc(x.name)}**: {x.treatment}" + (f" ({x.years}-year average)" if x.treatment == "normalize" else "")
+                    + (f", alarm: {x.alarm}" if x.alarm and x.alarm != "none" else "") for x in d.items))
+            for prob in d.problems:
+                st.error(prob)
+            st.code(a.read_text(), language="markdown")
+        else:
+            st.caption("Not added.")
+        for log in (C.FETCH_LOG_10KQ, C.FETCH_LOG_8K):
+            st.markdown(f"**{log}**")
+            p = tdir / log
+            if p.exists():
+                try:
+                    st.dataframe(pd.read_excel(p), hide_index=True, height=220)
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Could not read {log}: {e}")
+            else:
+                st.caption("Not saved yet.")
+        st.markdown("**Saved filings**")
+        fl = sorted(p.name for p in (tdir / "filings").glob("*")) if (tdir / "filings").is_dir() else []
+        st.markdown("\n".join(f"- {n}" for n in fl) if fl else "_None yet._")
+
+
 def show_setup_guide(g) -> None:
     """First-time setup for a ticker: exactly what to save, with direct links (built by code from EDGAR)."""
     st.markdown(f"#### First-time setup required for {g.ticker}: {esc(g.company)} (SEC CIK {g.cik})")
@@ -435,7 +519,9 @@ st.title("Pre-market Research Agent")
 st.caption("Evidence-backed ROE and Owner Earnings Yield for a self-directed investor. "
            "The agent prepares research; Shubhansh makes every decision.")
 
-tab_run, tab_evals, tab_how = st.tabs(["Research", "Evals", "How it works"])
+SETUP_TAB = "Setup & filings"
+tab_run, tab_setup, tab_evals, tab_how = st.tabs(["Research", SETUP_TAB, "Evals", "How it works"],
+                                                 key="main_tab", on_change="rerun")
 
 with tab_run:
     c1, c2 = st.columns([2, 3])
@@ -499,6 +585,9 @@ with tab_run:
             st.error("**Needs information** (metric withheld, nothing estimated)\n\n" + "\n".join(f"- {esc(m)}" for m in row.missing))
         if row.setup_guide is not None:
             show_setup_guide(row.setup_guide)
+        if (row.setup_guide is not None or row.new_filings) and not row.test_mode:
+            st.button(f"Go to {SETUP_TAB} for {row.ticker}", key=f"goto_setup_{row.run_id}",
+                      on_click=go_to_setup, args=(row.ticker,))
         if row.roe is not None or row.oey is not None:
             mc1, mc2 = st.columns(2)
             metric_block(mc1, row.roe, row.baseline_roe)
@@ -585,6 +674,13 @@ with tab_run:
             with st.expander(f"Other tickers run earlier in this session ({', '.join(p.parent.name for p in others)})"):
                 for p in others:
                     show_log(p)
+
+with tab_setup:
+    # Streamlit runs every tab's code on every click; this tab reads filings, so it only does its work
+    # while it is the open tab. That keeps the Research tab as fast as before.
+    if st.session_state.get("main_tab") == SETUP_TAB:
+        with st.spinner("Checking each ticker's folder…"):
+            render_setup_tab()
 
 with tab_evals:
     st.subheader("Evaluation scorecard")
