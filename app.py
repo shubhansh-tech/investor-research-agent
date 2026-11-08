@@ -24,7 +24,7 @@ from agent import decisions as decisions_mod
 from agent import setup_status, storage
 from agent.calc import fmt_money, pct
 from agent.llm import LLMError, get_llm
-from agent.pipeline import NEEDS_INFO, READY, REVIEW_FIRST, run_research
+from agent.pipeline import NEEDS_INFO, READY, REVIEW_FIRST, read_assumptions, run_research
 from agent.prompts import ASK_SYSTEM
 from agent.version import label as version_label
 from evals.scenarios import build as build_scenario
@@ -332,11 +332,25 @@ def render_setup_tab() -> None:
             if s.new_filings:
                 st.markdown("**New filing(s) on EDGAR, not yet saved:**\n" + "\n".join(
                     f"- {f.form} filed {f.filing_date} · [EDGAR index page]({f.url})" for f in s.new_filings))
-            st.caption("Action buttons for each step arrive in the next build.")
+            if s.next_step is not None or s.new_filings:
+                st.caption("Action buttons for each step arrive in the next build.")
             show_ticker_files(root, t)
     with st.expander("📄 View agent rules (research_rules.md, all tickers)", expanded=False):
         rp = root / C.RULES_FILE
         st.markdown(rp.read_text() if rp.exists() else "_No rules file found._")
+
+
+def plain_treatment(x) -> str:
+    return {"remove": "taken out of owner earnings",
+            "normalize": f"replaced by its {x.years}-year average",
+            "as_reported": "kept as reported",
+            "exclude": "left out (not owner earnings)",
+            "keep": "kept"}.get(x.treatment, x.treatment)
+
+
+def plain_alarm(x) -> str:
+    return {"size": "; alarm if it is large compared with earnings",
+            "deviation": f"; alarm if this year is far from its {x.years}-year normal"}.get(x.alarm or "none", "")
 
 
 def show_ticker_files(root: Path, t: str) -> None:
@@ -349,10 +363,14 @@ def show_ticker_files(root: Path, t: str) -> None:
         st.markdown("**assumptions.md**")
         if a.exists():
             d = decisions_mod.load(tdir)
-            if d.items:
-                st.markdown("What the agent understood:\n" + "\n".join(
-                    f"- **{esc(x.name)}**: {x.treatment}" + (f" ({x.years}-year average)" if x.treatment == "normalize" else "")
-                    + (f", alarm: {x.alarm}" if x.alarm and x.alarm != "none" else "") for x in d.items))
+            overrides, _ = read_assumptions(tdir)
+            lines = []
+            if "maintenance_capex" in overrides:
+                lines.append(f"- **Maintenance capex:** {fmt_money(float(overrides['maintenance_capex']))} a year "
+                             "(spending needed just to keep the business running)")
+            lines += [f"- **{esc(x.name)}:** {plain_treatment(x)}" + plain_alarm(x) for x in d.items]
+            if lines:
+                st.markdown("What the agent understood:\n" + "\n".join(lines))
             for prob in d.problems:
                 st.error(prob)
             st.code(a.read_text(), language="markdown")
