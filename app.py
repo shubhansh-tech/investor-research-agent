@@ -293,7 +293,8 @@ FOCUS_JS = """<script>
 def go_to_setup(ticker: str) -> None:
     """Button callback: open the setup tab with this ticker's section first and expanded."""
     st.session_state["main_tab"] = SETUP_TAB
-    st.session_state["setup_focus"] = ticker
+    st.session_state["setup_goto"] = ticker      # suggestion for the box
+    st.session_state["setup_open"] = ticker      # section shown first and open
 
 
 def _latest_rows_by_ticker() -> dict:
@@ -314,12 +315,37 @@ def render_setup_tab() -> None:
         st.info("Setup works in **daily use** (Test mode unchecked). Test mode uses fixed saved data so the "
                 "45-run evaluation stays repeatable. You can still view each ticker's files below.")
     latest = _latest_rows_by_ticker()
-    focus = st.session_state.get("setup_focus")
-    tickers = setup_status.list_tickers(root, extra=[t for t, r in latest.items() if r.setup_guide is not None]
-                                        + ([focus] if focus else []))
-    if focus in tickers:
-        tickers.remove(focus)
-        tickers.insert(0, focus)
+    # Tickers from the latest Research run that stopped at "setup required" and still have no folder,
+    # in the order they were typed on Research.
+    pending = [t for t, r in latest.items() if r.setup_guide is not None and not (root / t).is_dir()]
+    added = st.session_state.setdefault("setup_added", [])
+    # ---- the setup box: pre-filled with a "Go to Setup" choice, else the first ticker still needing setup
+    # The suggestion comes only from outside the box (a Research run or a "Go to Setup" click), so your
+    # own "Set up" click never overwrites what you typed.
+    choice = st.session_state.get("setup_goto")
+    prefill = choice if (choice and not (root / choice).is_dir()) else (pending[0] if pending else "")
+    if st.session_state.get("_setup_prefill_last") != prefill:
+        st.session_state["setup_ticker_box"] = prefill        # a new suggestion replaces the box's text
+        st.session_state["_setup_prefill_last"] = prefill
+    b1, b2 = st.columns([2, 1], vertical_alignment="bottom")
+    box = b1.text_input("Ticker to set up", key="setup_ticker_box", placeholder="e.g. TSLA",
+                        help="Pre-filled with the first ticker from your Research run that still needs setup.")
+    if b2.button("Set up", type="primary"):
+        t = (box or "").strip().upper()
+        if not TICKER_RE.fullmatch(t):
+            st.error("Enter one ticker, for example TSLA.")
+        else:
+            st.session_state["setup_open"] = t
+            if t not in added:
+                added.append(t)
+            status_now = setup_status.ticker_status(root, t, C.today_et())
+            if status_now.next_step is None and not status_now.new_filings:
+                st.info(f"{t} is already set up. Its section is open below.")
+    focus = st.session_state.get("setup_open")
+    tickers = setup_status.list_tickers(root, extra=pending + added + ([focus] if focus else []))
+    # Order: your current choice first, then tickers needing setup (in Research order), then the rest.
+    first = [t for t in ([focus] if focus else []) + pending + added if t in tickers]
+    tickers = list(dict.fromkeys(first + tickers))
     st.caption("One section per ticker. Only the next thing to do is red and open; finished steps close with ✅.")
     for t in tickers:
         r = latest.get(t)
@@ -588,6 +614,8 @@ with tab_run:
                                    as_of=TEST_AS_OF if test_mode else C.today_et(), llm=llm, ledger_root=LEDGER)
                 new_rows.append({"row": row, "root": root, "decision": None, "answer": None, "feedback": None})
         st.session_state.rows = new_rows
+        st.session_state.pop("setup_goto", None)    # a new Research run decides the setup suggestion afresh
+        st.session_state.pop("setup_open", None)
 
     for idx, item in enumerate(st.session_state.rows):
         row = item["row"]
