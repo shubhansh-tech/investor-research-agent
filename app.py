@@ -21,7 +21,7 @@ import yaml
 
 from agent import config as C
 from agent import decisions as decisions_mod
-from agent import setup_status, storage
+from agent import onboarding, setup_actions, setup_status, storage
 from agent.calc import fmt_money, pct
 from agent.llm import LLMError, get_llm
 from agent.pipeline import NEEDS_INFO, READY, REVIEW_FIRST, read_assumptions, run_research
@@ -317,13 +317,18 @@ def render_setup_tab() -> None:
     latest = _latest_rows_by_ticker()
     # Tickers from the latest Research run that stopped at "setup required" and still have no folder,
     # in the order they were typed on Research.
-    pending = [t for t, r in latest.items() if r.setup_guide is not None and not (root / t).is_dir()]
+    def unfinished(t: str) -> bool:
+        g = st.session_state.get("setup_guides", {}).get(t) or (latest[t].setup_guide if t in latest else None)
+        req = [d.file_name for d in g.required] if g else None
+        return setup_status.ticker_status(root, t, C.today_et(), required_files=req).next_step is not None
+
+    pending = [t for t, r in latest.items() if r.setup_guide is not None and unfinished(t)]
     added = st.session_state.setdefault("setup_added", [])
     # ---- the setup box: pre-filled with a "Go to Setup" choice, else the first ticker still needing setup
     # The suggestion comes only from outside the box (a Research run or a "Go to Setup" click), so your
     # own "Set up" click never overwrites what you typed.
     choice = st.session_state.get("setup_goto")
-    prefill = choice if (choice and not (root / choice).is_dir()) else (pending[0] if pending else "")
+    prefill = choice if (choice and unfinished(choice)) else (pending[0] if pending else "")
     if st.session_state.get("_setup_prefill_last") != prefill:
         st.session_state["setup_ticker_box"] = prefill        # a new suggestion replaces the box's text
         st.session_state["_setup_prefill_last"] = prefill
@@ -349,7 +354,9 @@ def render_setup_tab() -> None:
     st.caption("One section per ticker. Only the next thing to do is red and open; finished steps close with ✅.")
     for t in tickers:
         r = latest.get(t)
-        s = setup_status.ticker_status(root, t, C.today_et(), r.new_filings if r else None)
+        g = st.session_state.get("setup_guides", {}).get(t) or (r.setup_guide if r is not None else None)
+        s = setup_status.ticker_status(root, t, C.today_et(), r.new_filings if r else None,
+                                       required_files=[d.file_name for d in g.required] if g else None)
         open_it = (t == focus) or (s.next_step is not None and focus is None) or bool(s.new_filings)
         with st.expander(s.headline, expanded=open_it):
             for step in s.steps:
@@ -358,8 +365,8 @@ def render_setup_tab() -> None:
             if s.new_filings:
                 st.markdown("**New filing(s) on EDGAR, not yet saved:**\n" + "\n".join(
                     f"- {f.form} filed {f.filing_date} · [EDGAR index page]({f.url})" for f in s.new_filings))
-            if s.next_step is not None or s.new_filings:
-                st.caption("Action buttons for each step arrive in the next build.")
+            if s.next_step is not None or any(x.state == setup_status.OPTIONAL for x in s.steps):
+                render_step_actions(root, t, s)
             show_ticker_files(root, t)
     with st.expander("📄 View agent rules (research_rules.md, all tickers)", expanded=False):
         rp = root / C.RULES_FILE
@@ -377,6 +384,104 @@ def plain_treatment(x) -> str:
 def plain_alarm(x) -> str:
     return {"size": "; alarm if it is large compared with earnings",
             "deviation": f"; alarm if this year is far from its {x.years}-year normal"}.get(x.alarm or "none", "")
+
+
+SAVE_INSTRUCTIONS = """**How to save each filing**
+1. **Click the filing's link** below. It opens the filing itself on sec.gov (the address starts with
+   `https://www.sec.gov/Archives/edgar/data/…` and ends in `.htm`).
+2. **If you found the filing on EDGAR yourself instead,** the address looks like
+   `https://www.sec.gov/ix?doc=/Archives/edgar/data/…/name.htm`. Click in the address bar, **delete `ix?doc=/`**,
+   and press Enter. The page looks plainer: that's the right one.
+3. **Save the page:** Chrome: File → *Save Page As…* → Format **Webpage, HTML Only**.
+   Safari: File → *Save As…* → Format **Page Source**.
+4. **Keep the file name shown** (for example `tsla-20260930.htm`).
+5. **Upload it in the slot next to that filing.** It is checked at once: the right company, form and period."""
+
+
+def _guide(t: str):
+    """The EDGAR lookup for a ticker, kept for this session (one EDGAR visit per ticker)."""
+    guides = st.session_state.setdefault("setup_guides", {})
+    if t not in guides:
+        latest = _latest_rows_by_ticker().get(t)
+        guides[t] = latest.setup_guide if latest is not None and latest.setup_guide is not None else \
+            onboarding.build_guide(t, C.today_et())
+    return guides[t]
+
+
+def render_step_actions(root: Path, t: str, s) -> None:
+    """The button(s) for the step that needs action. Writes happen only on a confirm click."""
+    if test_mode:
+        st.caption("Setup actions work in daily use (Test mode unchecked).")
+        return
+    step = s.next_step or next((x for x in s.steps if x.state == setup_status.OPTIONAL), None)
+    tdir = root / t
+    try:
+        if step.n == 1:
+            if st.button(f"Look up {t} on SEC EDGAR", key=f"lookup_{t}"):
+                with st.spinner("Looking it up on EDGAR…"):
+                    _guide(t)
+            g = st.session_state.get("setup_guides", {}).get(t)
+            if g is not None:
+                st.markdown(f"Found: **{esc(g.company)}** (SEC CIK {g.cik}). Is this the right company?")
+                if st.button(f"Create folder {t}", key=f"mkdir_{t}", type="primary"):
+                    setup_actions.create_folder(root, t)
+                    st.rerun()
+        elif step.n == 2:
+            g = _guide(t)
+            if st.button("Get fetch logs from EDGAR", key=f"getlogs_{t}"):
+                st.session_state[f"logs_ready_{t}"] = True
+            if st.session_state.get(f"logs_ready_{t}"):
+                need = {d.accession for d in g.required}
+                st.markdown(f"**{C.FETCH_LOG_10KQ}**: rows highlighted are the filings this setup uses.")
+                kq = setup_actions.log_table(g.log_10kq)
+                st.dataframe(kq.style.apply(lambda r: ["background-color:#E1F5EE" if r["Accession Number"] in need
+                                                       else "" for _ in r], axis=1), hide_index=True, height=240)
+                st.markdown(f"**{C.FETCH_LOG_8K}**: highlighted rows carry item 2.02 (earnings) or 4.02 (restatement).")
+                k8 = setup_actions.log_table(g.log_8k)
+                st.dataframe(k8.style.apply(lambda r: ["background-color:#FAEEDA" if any(i in str(r.get("Items", ""))
+                                                       for i in C.REQUIRED_8K_ITEMS) else "" for _ in r], axis=1),
+                             hide_index=True, height=240)
+                if st.button("Confirm and save both logs", key=f"savelogs_{t}", type="primary"):
+                    setup_actions.save_logs(tdir, g)
+                    st.session_state.pop(f"logs_ready_{t}", None)
+                    st.rerun()
+        elif step.n == 3:
+            g = _guide(t)
+            st.markdown(SAVE_INSTRUCTIONS)
+            for d in g.required:
+                saved = (tdir / "filings" / d.file_name).exists()
+                st.markdown(f"{'✅' if saved else '🔴'} **{d.form}** filed {d.filed} · {esc(d.role)}  \n"
+                            f"[{d.file_name}]({d.doc_url}) · [EDGAR index page]({d.index_url})")
+                if not saved:
+                    up = st.file_uploader(f"Upload {d.file_name}", type=["htm", "html"], key=f"up_{t}_{d.accession}")
+                    if up is not None:
+                        ok, msg = setup_actions.check_filing(up.getvalue(), d, g.cik, t)
+                        if ok:
+                            setup_actions.save_filing(tdir, d, up.getvalue())
+                            st.success(msg + " Saved.")
+                            st.rerun()
+                        else:
+                            st.error(msg + " Not saved.")
+        elif step.n == 4:
+            st.markdown("Optional. Standing decisions and maintenance capex (see CB or QUBT for the format). "
+                        "Without it the agent still runs and flags one-time items for review.")
+            up = st.file_uploader("Upload assumptions.md", type=["md", "txt"], key=f"assump_{t}")
+            if up is not None:
+                dec, overrides, text, problems = setup_actions.check_assumptions(up.getvalue())
+                for prob in problems:
+                    st.error(prob)
+                if dec is not None:
+                    lines = ([f"- **Maintenance capex:** {fmt_money(float(overrides['maintenance_capex']))} a year"]
+                             if "maintenance_capex" in overrides else [])
+                    lines += [f"- **{esc(x.name)}:** {plain_treatment(x)}" + plain_alarm(x) for x in dec.items]
+                    st.markdown("What the agent will understand:\n" + ("\n".join(lines) if lines else "_nothing yet_"))
+                    if not problems and st.button("Confirm and save assumptions.md", key=f"saveas_{t}", type="primary"):
+                        setup_actions.save_assumptions(tdir, text)
+                        st.rerun()
+    except ValueError as e:                       # e.g. ticker not found on EDGAR
+        st.error(str(e))
+    except Exception as e:  # noqa: BLE001
+        st.error(f"SEC EDGAR could not be reached ({e}). Try again in a minute.")
 
 
 def show_ticker_files(root: Path, t: str) -> None:
@@ -407,7 +512,7 @@ def show_ticker_files(root: Path, t: str) -> None:
             p = tdir / log
             if p.exists():
                 try:
-                    st.dataframe(pd.read_excel(p), hide_index=True, height=220)
+                    st.dataframe(setup_actions.log_table(p.read_bytes()), hide_index=True, height=220)
                 except Exception as e:  # noqa: BLE001
                     st.error(f"Could not read {log}: {e}")
             else:

@@ -121,9 +121,10 @@ def build_guide(ticker: str, as_of: date, log: list | None = None, fetch=None) -
     return _with_logs(g, rows)
 
 
-def _log_bytes(rows: list[dict]) -> bytes:
+def _log_bytes(rows: list[dict], with_items: bool = False) -> bytes:
     df = pd.DataFrame([{"Form Type": r["form"], "Form Description": r["desc"] or r["form"],
                         "Filing Date": r["filed"], "Reporting Date": r["period"] or r["filed"],
+                        **({"Items": r["items"]} if with_items else {}),
                         "Filings URL": r["index"], "Accession Number": r["acc"]} for r in rows])
     buf = io.BytesIO()
     df.to_excel(buf, index=False)
@@ -134,5 +135,6 @@ def _with_logs(g: SetupGuide, rows: list[dict]) -> SetupGuide:
     """The fetch logs record what was on EDGAR when the owner downloaded: the same layout as EDGAR's export.
     From the next run on, any filing not in these logs counts as new and is asked for by name."""
     g.log_10kq = _log_bytes([r for r in rows if r["form"] in C.REQUIRED_FORMS])
-    g.log_8k = _log_bytes([r for r in rows if r["form"] in {"8-K", "8-K/A"}])
+    # 8-K item numbers (e.g. 2.02 = results of operations / earnings, 4.02 = restatement) are kept in the log.
+    g.log_8k = _log_bytes([r for r in rows if r["form"] in {"8-K", "8-K/A"}], with_items=True)
     return g

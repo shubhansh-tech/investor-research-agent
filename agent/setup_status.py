@@ -66,7 +66,10 @@ def list_tickers(root: Path, extra: list[str] | None = None) -> list[str]:
     return found
 
 
-def ticker_status(root: Path, ticker: str, as_of: date, new_filings: list | None = None) -> TickerStatus:
+def ticker_status(root: Path, ticker: str, as_of: date, new_filings: list | None = None,
+                  required_files: list[str] | None = None) -> TickerStatus:
+    """required_files: the file names a setup guide listed (from EDGAR). When given, step 3 is done only
+    when every one of them is saved, not merely when some trailing-twelve-month set can be built."""
     st = TickerStatus(ticker, new_filings=list(new_filings or []))
     tdir = root / ticker
     if not tdir.is_dir():
@@ -89,7 +92,12 @@ def ticker_status(root: Path, ticker: str, as_of: date, new_filings: list | None
         st.steps.append(Step(3, LOCKED, "After step 2"))
     else:
         ttm = select_ttm(filings, as_of)
-        if ttm.problems or ttm.annual is None:
+        names = {f.path.name for f in filings}
+        still = [n for n in (required_files or []) if n not in names]
+        if still:
+            st.steps.append(Step(3, ACTION, f"{len(required_files) - len(still)} of {len(required_files)} saved; "
+                                            "still needed: " + ", ".join(still)))
+        elif ttm.problems or ttm.annual is None:
             st.steps.append(Step(3, ACTION, f"{len(filings)} saved; " + "; ".join(ttm.problems or ["latest 10-K missing"])))
         else:
             st.steps.append(Step(3, DONE, f"{len(filings)} saved; trailing twelve months can be built ({ttm.mode})"))

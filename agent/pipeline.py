@@ -220,6 +220,17 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
 
     log_kq = read_filing_list(tdir / C.FETCH_LOG_10KQ)
     log_8k = read_filing_list(tdir / C.FETCH_LOG_8K)
+    # The fetch log says what was downloaded. If it lists a 10-K or 10-Q newer than the newest one saved in
+    # filings/, that filing was logged but never saved: stop, rather than quietly using older numbers.
+    saved_latest = max((f.period_end for f in filings if f.period_end), default=None)
+    logged = [r for r in log_kq if r.form in {"10-K", "10-Q"} and r.report_date
+              and (r.filing_date is None or r.filing_date <= as_of)]
+    newest_logged = max(logged, key=lambda r: r.report_date, default=None)
+    if newest_logged and saved_latest and newest_logged.report_date > saved_latest:
+        row.missing.append(f"{C.FETCH_LOG_10KQ} lists the {newest_logged.form} for the period ended "
+                           f"{newest_logged.report_date} (filed {newest_logged.filing_date}), but it is not in "
+                           f"{ticker}/filings/; save it (Setup & filings tab): {newest_logged.url}")
+        return finish()
     try:
         edgar = edgar_list_snapshot(tdir) if test_mode else edgar_list_live(ticker, row.live_calls)
         tr(f"EDGAR filing list: {len(edgar)} filings ({'saved TEST snapshot' if test_mode else 'live sec.gov'})")
