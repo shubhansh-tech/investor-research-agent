@@ -665,6 +665,7 @@ def ask(row, question: str) -> str:
 
 # ================================================================ main
 st.title("Pre-market Research Agent")
+st.markdown(":red[**Educational project, not investment advice.**]")
 st.caption("Evidence-backed ROE and Owner Earnings Yield for a self-directed investor. "
            "The agent prepares research; Shubhansh makes every decision.")
 
