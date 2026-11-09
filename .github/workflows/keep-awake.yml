@@ -1,0 +1,47 @@
+# Keeps the hosted demo awake for recruiters and interviewers, so nobody meets Streamlit's
+# "wake up" screen. Runs every 6 hours (the app sleeps after about 12 hours without visitors)
+# and stops itself after 2026-12-09. It can also be started by hand from the Actions tab.
+name: Keep demo awake
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"     # 00:17, 06:17, 12:17, 18:17 UTC; off the hour, when GitHub is busiest
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Stop after 2026-12-09
+        id: window
+        run: |
+          if [ "$(date -u +%Y%m%d)" -gt 20261209 ]; then
+            echo "Past 2026-12-09: nothing to do."; echo "active=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "active=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.window.outputs.active == 'true'
+      - uses: actions/setup-python@v5
+        if: steps.window.outputs.active == 'true'
+        with:
+          python-version: "3.12"
+      - name: Install a headless browser
+        if: steps.window.outputs.active == 'true'
+        run: |
+          pip install playwright==1.48.0
+          python -m playwright install --with-deps chromium
+      - name: Open the app (and wake it if asleep)
+        if: steps.window.outputs.active == 'true'
+        run: python scripts/keep_awake.py
+      - name: Keep a screenshot if it failed
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keep-awake-failure
+          path: keep_awake_failure.png
+          if-no-files-found: ignore
