@@ -11,7 +11,9 @@ Uploaded files are data, never instructions.
 from __future__ import annotations
 
 import io
+import re
 import tempfile
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pandas as pd
@@ -94,3 +96,48 @@ def check_assumptions(data: bytes):
 
 def save_assumptions(tdir: Path, text: str) -> None:
     (tdir / "assumptions.md").write_text(text)
+
+
+# ------------------------------------------------------------------ later filings (part 3)
+@dataclass
+class UpdateNeeds:
+    """What a set-up ticker needs after the company files something new on EDGAR."""
+    missing: list = field(default_factory=list)       # onboarding.Doc: filings the twelve months now need
+    new_kq: list[str] = field(default_factory=list)   # accession numbers new to the 10-K/10-Q log
+    new_8k: list[str] = field(default_factory=list)   # accession numbers new to the 8-K log
+    unused: list[str] = field(default_factory=list)   # saved filings no longer used for the twelve months
+
+    @property
+    def any(self) -> bool:
+        return bool(self.missing or self.new_kq or self.new_8k)
+
+
+def _acc(s) -> str:
+    return re.sub(r"\D", "", str(s or ""))
+
+
+def _logged(path: Path) -> set[str]:
+    from .filings import read_filing_list
+    return {_acc(r.accession) for r in read_filing_list(path)} if path.exists() else set()
+
+
+def update_needs(tdir: Path, guide) -> UpdateNeeds:
+    """Compare a fresh EDGAR lookup (guide) with the ticker's folder."""
+    saved = {p.name for p in (tdir / "filings").glob("*")} if (tdir / "filings").is_dir() else set()
+    need = UpdateNeeds(missing=[d for d in guide.required if d.file_name not in saved])
+    old_kq, old_8k = _logged(tdir / C.FETCH_LOG_10KQ), _logged(tdir / C.FETCH_LOG_8K)
+    need.new_kq = [a for a in log_table(guide.log_10kq)["Accession Number"].map(_acc) if a not in old_kq]
+    k8 = log_table(guide.log_8k)
+    need.new_8k = [a for a in k8["Accession Number"].map(_acc) if a not in old_8k] if len(k8) else []
+    used = {d.file_name for d in guide.required}
+    need.unused = sorted(n for n in saved if n not in used)
+    return need
+
+
+def save_updated_logs(tdir: Path, guide) -> None:
+    """Replace both logs with the fresh EDGAR lists; the previous versions are kept beside them."""
+    for name, data in ((C.FETCH_LOG_10KQ, guide.log_10kq), (C.FETCH_LOG_8K, guide.log_8k)):
+        p = tdir / name
+        if p.exists():
+            p.with_name(p.stem + "_previous" + p.suffix).write_bytes(p.read_bytes())
+        p.write_bytes(data)

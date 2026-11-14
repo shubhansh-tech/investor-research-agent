@@ -7,6 +7,7 @@ no trade, order or brokerage tool exists anywhere in this codebase.
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 import re
 import os
 import shutil
@@ -354,17 +355,54 @@ def render_setup_tab() -> None:
     st.caption("One section per ticker. Only the next thing to do is red and open; finished steps close with ✅.")
     for t in tickers:
         r = latest.get(t)
-        g = st.session_state.get("setup_guides", {}).get(t) or (r.setup_guide if r is not None else None)
-        s = setup_status.ticker_status(root, t, C.today_et(), r.new_filings if r else None,
-                                       required_files=[d.file_name for d in g.required] if g else None)
+        guides = st.session_state.setdefault("setup_guides", {})
+        # A ticker in its first-time setup stays in the setup steps until every listed filing is saved;
+        # only a ticker that was already set up gets the "new filing" flow.
+        onboarding_now = t in added or (r is not None and r.setup_guide is not None)
+        g0 = guides.get(t) or (r.setup_guide if r is not None else None)
+        base = setup_status.ticker_status(root, t, C.today_et(), required_files=(
+            [d.file_name for d in g0.required] if (onboarding_now and g0) else None))
+        is_set_up = base.next_step is None
+        need = None
+        if is_set_up and not test_mode:
+            # A Research run that found something new on EDGAR: look up what the twelve months now need.
+            if r is not None and r.new_filings and t not in guides:
+                try:
+                    guides[t] = onboarding.build_guide(t, C.today_et())
+                    st.session_state.setdefault("setup_checked", {})[t] = C.now_et()
+                except Exception as e:  # noqa: BLE001
+                    st.warning(f"{t}: SEC EDGAR could not be reached to check new filings ({e}).")
+            if t in guides:
+                need = setup_actions.update_needs(root / t, guides[t])
+        g = guides.get(t) or (r.setup_guide if r is not None else None)
+        if is_set_up:
+            pending = ([SimpleNamespace(form=d.form, filing_date=d.filed) for d in need.missing]
+                       or ([SimpleNamespace(form="fetch log update", filing_date=C.today_et())] if need.any else []))\
+                if need is not None else (r.new_filings if r else [])
+            s = setup_status.ticker_status(root, t, C.today_et(), pending)
+        else:
+            s = setup_status.ticker_status(root, t, C.today_et(), r.new_filings if r else None,
+                                           required_files=[d.file_name for d in g.required] if g else None)
         open_it = (t == focus) or (s.next_step is not None and focus is None) or bool(s.new_filings)
-        with st.expander(s.headline, expanded=open_it):
+        headline = s.headline
+        checked = st.session_state.get("setup_checked", {}).get(t)
+        if need is not None and not need.any and checked is not None:
+            headline = f"✅ {t} · Up to date with SEC EDGAR (checked {checked:%b %d, %H:%M} ET)"
+        with st.expander(headline, expanded=open_it):
             for step in s.steps:
                 label = f"{STEP_ICON[step.state]} Step {step.n} · {setup_status.STEP_NAMES[step.n]}: {step.detail}"
                 st.markdown(f":red[**{label}**]" if step.state == setup_status.ACTION else label)
-            if s.new_filings:
-                st.markdown("**New filing(s) on EDGAR, not yet saved:**\n" + "\n".join(
-                    f"- {f.form} filed {f.filing_date} · [EDGAR index page]({f.url})" for f in s.new_filings))
+            if is_set_up and not test_mode:
+                if need is not None and need.any:
+                    render_update_flow(root, t, guides[t], need)
+                if st.button("Check EDGAR for new filings", key=f"check_{t}"):
+                    try:
+                        guides[t] = onboarding.build_guide(t, C.today_et())
+                        st.session_state.setdefault("setup_checked", {})[t] = C.now_et()
+                        st.session_state["setup_open"] = t
+                    except Exception as e:  # noqa: BLE001
+                        st.error(f"SEC EDGAR could not be reached ({e}). Try again in a minute.")
+                    st.rerun()
             if s.next_step is not None or any(x.state == setup_status.OPTIONAL for x in s.steps):
                 render_step_actions(root, t, s)
             show_ticker_files(root, t)
@@ -408,6 +446,64 @@ def _guide(t: str):
     return guides[t]
 
 
+def filing_upload_slots(tdir: Path, t: str, g, docs) -> None:
+    """One line per filing with its links; an upload slot for each one not yet saved (strict check)."""
+    for d in docs:
+        saved = (tdir / "filings" / d.file_name).exists()
+        st.markdown(f"{'✅' if saved else '🔴'} **{d.form}** filed {d.filed} · {esc(d.role)}  \n"
+                    f"[{d.file_name}]({d.doc_url}) · [EDGAR index page]({d.index_url})")
+        if not saved:
+            up = st.file_uploader(f"Upload {d.file_name}", type=["htm", "html"], key=f"up_{t}_{d.accession}")
+            if up is not None:
+                ok, msg = setup_actions.check_filing(up.getvalue(), d, g.cik, t)
+                if ok:
+                    setup_actions.save_filing(tdir, d, up.getvalue())
+                    st.success(msg + " Saved.")
+                    st.rerun()
+                else:
+                    st.error(msg + " Not saved.")
+
+
+def _highlight(df, accs: set, color: str):
+    key = df["Accession Number"].astype(str).str.replace(r"\D", "", regex=True)
+    return df.style.apply(lambda r: [f"background-color:{color}" if key[r.name] in accs else "" for _ in r], axis=1)
+
+
+def render_update_flow(root: Path, t: str, g, need) -> None:
+    """A set-up ticker whose company filed something new: save it, then confirm the updated logs."""
+    tdir = root / t
+    st.markdown(f"**{t} has new filing(s) on SEC EDGAR.** Save what the trailing twelve months now need, "
+                "then confirm the updated fetch logs.")
+    if need.missing:
+        st.markdown("**1. Filings to save**")
+        st.markdown(SAVE_INSTRUCTIONS)
+        filing_upload_slots(tdir, t, g, need.missing)
+    else:
+        st.markdown("**1. Filings to save:** ✅ all saved.")
+    if need.new_kq or need.new_8k:
+        st.markdown("**2. Updated fetch logs:** your current log beside the new one; new rows are highlighted.")
+        for name, data, new in ((C.FETCH_LOG_10KQ, g.log_10kq, need.new_kq), (C.FETCH_LOG_8K, g.log_8k, need.new_8k)):
+            if not new:
+                continue
+            c1, c2 = st.columns(2)
+            c1.caption(f"Current {name}")
+            cur = tdir / name
+            if cur.exists():
+                c1.dataframe(setup_actions.log_table(cur.read_bytes()), hide_index=True, height=220)
+            c2.caption(f"Updated {name} ({len(new)} new row(s))")
+            c2.dataframe(_highlight(setup_actions.log_table(data), set(new), "#FAEEDA"), hide_index=True, height=220)
+        if need.missing:
+            st.caption("Save the filing(s) above first: a log that lists a filing the folder doesn't have would stop "
+                       "every Research run.")
+        elif st.button("Confirm and save the updated logs", key=f"savelogs_upd_{t}", type="primary"):
+            setup_actions.save_updated_logs(tdir, g)
+            st.session_state["setup_open"] = t       # keep the section open to show "up to date"
+            st.rerun()
+    if need.unused:
+        st.caption("No longer used for the trailing twelve months (kept in the folder, ignored by the agent): "
+                   + ", ".join(need.unused))
+
+
 def render_step_actions(root: Path, t: str, s) -> None:
     """The button(s) for the step that needs action. Writes happen only on a confirm click."""
     if test_mode:
@@ -448,20 +544,7 @@ def render_step_actions(root: Path, t: str, s) -> None:
         elif step.n == 3:
             g = _guide(t)
             st.markdown(SAVE_INSTRUCTIONS)
-            for d in g.required:
-                saved = (tdir / "filings" / d.file_name).exists()
-                st.markdown(f"{'✅' if saved else '🔴'} **{d.form}** filed {d.filed} · {esc(d.role)}  \n"
-                            f"[{d.file_name}]({d.doc_url}) · [EDGAR index page]({d.index_url})")
-                if not saved:
-                    up = st.file_uploader(f"Upload {d.file_name}", type=["htm", "html"], key=f"up_{t}_{d.accession}")
-                    if up is not None:
-                        ok, msg = setup_actions.check_filing(up.getvalue(), d, g.cik, t)
-                        if ok:
-                            setup_actions.save_filing(tdir, d, up.getvalue())
-                            st.success(msg + " Saved.")
-                            st.rerun()
-                        else:
-                            st.error(msg + " Not saved.")
+            filing_upload_slots(tdir, t, g, g.required)
         elif step.n == 4:
             st.markdown("Optional. Standing decisions and maintenance capex (see CB or QUBT for the format). "
                         "Without it the agent still runs and flags one-time items for review.")
