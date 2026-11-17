@@ -1,6 +1,8 @@
 # Design: "Setup & filings" tab
 
-**Status:** v4 (2026-11-08): read-only views of assumptions and rules added, always available, collapsed.
+**Status (2026-11-16):** all five parts built on `dev`: the tab and status list, the ticker box, steps 1–4, the new-filing flow, restore and download as a .zip, and rules upload. Test mode and the Evals tab read the app's original data, never the session's edited copy.
+
+**Earlier status:** v4 (2026-11-08): read-only views of assumptions and rules added, always available, collapsed.
 **Scope:** daily use only. Test mode keeps its fixed saved data, so the 45-run evaluation stays repeatable (Q6).
 **Storage:** session-only on the hosted app, plus a .zip you download and restore (Q5).
 
