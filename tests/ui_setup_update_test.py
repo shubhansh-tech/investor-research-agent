@@ -21,7 +21,7 @@ def settle(pg):
 def headers(pg):
     out=[]
     for h in pg.locator('[data-testid="stMain"] [data-testid="stExpander"] summary').all():
-        if h.is_visible(): out.append(re.sub(r"^keyboard_arrow_\w+", "", h.inner_text().replace("\n"," ")).strip())
+        if h.is_visible() and "Restore my setup" not in h.inner_text(): out.append(re.sub(r"^keyboard_arrow_\w+", "", h.inner_text().replace("\n"," ")).strip())
     return out
 def qubt(pg): return next((h for h in headers(pg) if "QUBT" in h and "View files" not in h), "")
 def upload(pg, slot, path): pg.locator(f'[aria-label="{slot}"] input[type="file"]').set_input_files(path); settle(pg)

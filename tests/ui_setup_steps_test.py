@@ -14,7 +14,7 @@ def settle(pg):
     time.sleep(0.8)
 def header(pg):
     for h in pg.locator('[data-testid="stMain"] [data-testid="stExpander"] summary').all():
-        if h.is_visible(): return re.sub(r"^keyboard_arrow_\w+", "", h.inner_text().replace("\n"," ")).strip()
+        if h.is_visible() and "Restore my setup" not in h.inner_text(): return re.sub(r"^keyboard_arrow_\w+", "", h.inner_text().replace("\n"," ")).strip()
 def slot_input(pg, slot):
     return pg.locator(f'[aria-label="{slot}"] input[type="file"]')
 def upload(pg, slot, path):

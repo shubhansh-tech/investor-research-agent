@@ -23,7 +23,7 @@ def headers(pg):
     settle(pg)
     out=[]
     for h in pg.locator('[data-testid="stMain"] [data-testid="stExpander"] summary').all():
-        if h.is_visible():
+        if h.is_visible() and "Restore my setup" not in h.inner_text():
             out.append(re.sub(r"^keyboard_arrow_\w+", "", h.inner_text().replace("\n", " ")).strip())
     return out
 with sync_playwright() as p:

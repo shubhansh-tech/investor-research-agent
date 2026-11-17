@@ -6,6 +6,7 @@ no trade, order or brokerage tool exists anywhere in this codebase.
 """
 from __future__ import annotations
 
+import difflib
 import json
 from types import SimpleNamespace
 import re
@@ -22,12 +23,12 @@ import yaml
 
 from agent import config as C
 from agent import decisions as decisions_mod
-from agent import onboarding, setup_actions, setup_status, storage
+from agent import onboarding, setup_actions, setup_bundle, setup_status, storage
 from agent.calc import fmt_money, pct
 from agent.llm import LLMError, get_llm
 from agent.pipeline import NEEDS_INFO, READY, REVIEW_FIRST, read_assumptions, run_research
 from agent.prompts import ASK_SYSTEM
-from agent.version import label as version_label
+from agent.version import app_version, label as version_label
 from evals.scenarios import build as build_scenario
 
 st.set_page_config(page_title="Pre-market Research Agent", page_icon="📈", layout="wide",
@@ -149,7 +150,7 @@ with st.sidebar:
     st.divider()
     # ---- your saved decision log: lets an approved baseline survive between sessions
     st.subheader("Your decision log")
-    ups = st.file_uploader("Load a saved analysis.xlsx", type=["xlsx"], accept_multiple_files=True,
+    ups = st.file_uploader("Load a saved analysis.xlsx", type=["xlsx"], accept_multiple_files=True, key="log_up",
                            help="Downloaded earlier from the decision log. Used only in this session, so your last "
                                 "approved run becomes the baseline. Test-mode approvals never serve as a daily baseline.")
     for up in ups or []:
@@ -166,6 +167,13 @@ with st.sidebar:
                       "count for this session is kept."):
         shutil.rmtree(WS, ignore_errors=True)
         _new_workspace()
+        # Also forget what is still sitting in upload boxes, suggestions and lookups, so nothing reappears.
+        # Kept: the real-model call count (cost cap) and the passcode.
+        clear_prefixes = ("setup_", "_setup_", "rules_", "restore_", "up_", "assump_", "logs_ready_", "tickers_",
+                          "price_", "_form_prev", "log_up", "goto_setup_", "dec_", "savelogs_", "check_", "lookup_",
+                          "mkdir_", "getlogs_", "saveas_", "confirm_", "dl_", "prep_")
+        for k in [k for k in st.session_state.keys() if str(k).startswith(clear_prefixes)]:
+            del st.session_state[k]
         st.session_state.cleared = True
         st.rerun()
     if st.session_state.pop("cleared", False):
@@ -291,6 +299,86 @@ FOCUS_JS = """<script>
 </script>"""
 
 
+def render_restore(root: Path) -> None:
+    """Restore from a .zip saved in an earlier session: show what is inside, then confirm."""
+    msg = st.session_state.pop("restored_msg", None)
+    if msg:
+        st.success(msg)
+    with st.expander("⤴ Restore my setup from a saved .zip", expanded=False):
+        # A new key empties the box after a restore (Streamlit does not allow clearing an upload box directly).
+        up = st.file_uploader("Saved setup (.zip)", type=["zip"], key=f"restore_zip_{st.session_state.get('restore_n', 0)}",
+                              help="The file you downloaded with 'Download my setup (.zip)'.")
+        if up is None:
+            return
+        pv = setup_bundle.inspect_bundle(up.getvalue())
+        if not pv.ok:
+            st.error(pv.error)
+            return
+        lines = [f"- **{t}**: {len(v)} file(s)" for t, v in sorted(pv.files.items())]
+        if pv.logs:
+            lines.append(f"- Decision logs: {', '.join(sorted(pv.logs))} (merged with this session's, run by run)")
+        if pv.rules:
+            lines.append("- Agent rules (research_rules.md)")
+        st.markdown((f"Saved {pv.created}. " if pv.created else "") + "This will restore:\n" + "\n".join(lines))
+        st.caption("Files with the same name in this session are replaced by the saved versions.")
+        if pv.skipped:
+            st.caption(f"Skipped {len(pv.skipped)} file(s) that are not part of a setup: " + ", ".join(pv.skipped[:5])
+                       + (" …" if len(pv.skipped) > 5 else ""))
+        if st.button("Confirm restore", type="primary", key="confirm_restore"):
+            setup_bundle.restore_bundle(up.getvalue(), root, LEDGER)
+            st.session_state.pop("setup_guides", None)      # look EDGAR up again against the restored folders
+            st.session_state["restored_msg"] = f"Restored {', '.join(sorted(pv.files)) or 'your rules and logs'}."
+            st.session_state["restore_n"] = st.session_state.get("restore_n", 0) + 1   # empty the box
+            st.rerun()
+
+
+def render_download(root: Path) -> None:
+    st.divider()
+    st.markdown("**Keep your setup.** This app keeps files only for this session. Download them as one .zip, "
+                "then restore it next time at the top of this tab.")
+    if st.button("Prepare my setup for download", key="prep_zip"):
+        with st.spinner("Packing your ticker folders, decision logs and rules…"):
+            ver = app_version()
+            st.session_state["setup_zip"] = setup_bundle.make_bundle(
+                root, LEDGER, ver.get("commit", ""), C.now_et().strftime("%Y-%m-%d %H:%M ET"))
+    data = st.session_state.get("setup_zip")
+    if data:
+        st.download_button(f"Download my setup (.zip, {len(data) / 1e6:.1f} MB)", data,
+                           file_name=f"research-agent-setup_{C.today_et():%Y-%m-%d}.zip", mime="application/zip",
+                           key="dl_zip", type="primary")
+
+
+def render_rules_upload(rp: Path) -> None:
+    """Replace the rules for this session: the changes are shown line by line before confirming."""
+    msg = st.session_state.pop("rules_msg", None)
+    if msg:
+        st.success(msg)
+    up = st.file_uploader("Upload new research_rules.md", type=["md", "txt"], key=f"rules_up_{st.session_state.get('rules_n', 0)}",
+                          help="Applies to every ticker in daily use. Test mode and the Evals tab keep the original rules.")
+    if up is None:
+        return
+    try:
+        new = up.getvalue().decode("utf-8")
+    except UnicodeDecodeError:
+        st.error("The file is not plain text (UTF-8). Save it as a .md or .txt text file.")
+        return
+    if not new.strip() or len(new) > 100_000:
+        st.error("The rules file must be plain text, not empty and under 100 KB.")
+        return
+    old = rp.read_text() if rp.exists() else ""
+    diff = list(difflib.unified_diff(old.splitlines(), new.splitlines(), "current rules", "new rules", lineterm="", n=1))
+    if not diff:
+        st.info("The new file is identical to the current rules.")
+        return
+    st.markdown("**Changes** (lines starting with − are removed, + are added):")
+    st.code("\n".join(diff), language="diff")
+    if st.button("Confirm new rules", type="primary", key="confirm_rules"):
+        rp.write_text(new, encoding="utf-8")
+        st.session_state["rules_n"] = st.session_state.get("rules_n", 0) + 1
+        st.session_state["rules_msg"] = "New rules saved for this session. Download your setup to keep them."
+        st.rerun()
+
+
 def go_to_setup(ticker: str) -> None:
     """Button callback: open the setup tab with this ticker's section first and expanded."""
     st.session_state["main_tab"] = SETUP_TAB
@@ -315,6 +403,8 @@ def render_setup_tab() -> None:
     if test_mode:
         st.info("Setup works in **daily use** (Test mode unchecked). Test mode uses fixed saved data so the "
                 "45-run evaluation stays repeatable. You can still view each ticker's files below.")
+    if not test_mode:
+        render_restore(root)
     latest = _latest_rows_by_ticker()
     # Tickers from the latest Research run that stopped at "setup required" and still have no folder,
     # in the order they were typed on Research.
@@ -409,6 +499,10 @@ def render_setup_tab() -> None:
     with st.expander("📄 View agent rules (research_rules.md, all tickers)", expanded=False):
         rp = root / C.RULES_FILE
         st.markdown(rp.read_text() if rp.exists() else "_No rules file found._")
+        if not test_mode:
+            render_rules_upload(rp)
+    if not test_mode:
+        render_download(root)
 
 
 def plain_treatment(x) -> str:
@@ -793,12 +887,13 @@ with tab_run:
             for t in tickers:
                 if test_mode and scenario is not None:
                     case = dict(scenario, ticker=t)
-                    root, used_t, proxy = build_scenario(case, WS / "data", WS / f"scn_{t}", TEST_AS_OF)
+                    root, used_t, proxy = build_scenario(case, C.DEFAULT_DATA_ROOT, WS / f"scn_{t}", TEST_AS_OF)
                     if proxy:
                         st.info(f"{t}: real filings not yet in the data folder, so this scenario runs on the fictional EXMP company.")
                     t = used_t
                 else:
-                    root = WS / "data"
+                    # Test mode reads the app's original data; daily use reads your working copy.
+                    root = C.DEFAULT_DATA_ROOT if test_mode else WS / "data"
                 row = run_research(t, prices[t if t in prices else tickers[0]], root, test_mode=test_mode,
                                    as_of=TEST_AS_OF if test_mode else C.today_et(), llm=llm, ledger_root=LEDGER)
                 new_rows.append({"row": row, "root": root, "decision": None, "answer": None, "feedback": None})
@@ -943,7 +1038,7 @@ with tab_evals:
             log.code("\n".join(lines[-15:]), language=None)
 
         st.session_state.eval_summary = run_suite(
-            n_runs, llm, WS / "data", scratch=WS / "evals", progress=prog,
+            n_runs, llm, C.DEFAULT_DATA_ROOT, scratch=WS / "evals", progress=prog,
             prior=prior_data["results"] if resume else None, checkpoint=ckpt)
         prior_data = st.session_state.eval_summary
     res_dir = C.REPO_ROOT / "evals" / "results"
