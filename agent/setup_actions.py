@@ -122,15 +122,19 @@ def _logged(path: Path) -> set[str]:
 
 
 def update_needs(tdir: Path, guide) -> UpdateNeeds:
-    """Compare a fresh EDGAR lookup (guide) with the ticker's folder."""
-    saved = {p.name for p in (tdir / "filings").glob("*")} if (tdir / "filings").is_dir() else set()
-    need = UpdateNeeds(missing=[d for d in guide.required if d.file_name not in saved])
+    """Compare a fresh EDGAR lookup (guide) with the ticker's folder.
+    A filing counts as saved when a file in filings/ IS that filing (same form and period on its own
+    cover page), whatever the file is called."""
+    from .filings import load_filings
+    from .setup_status import saved_copy
+    filings, _ = load_filings(tdir) if (tdir / "filings").is_dir() else ([], [])
+    need = UpdateNeeds(missing=[d for d in guide.required if saved_copy(filings, d) is None])
     old_kq, old_8k = _logged(tdir / C.FETCH_LOG_10KQ), _logged(tdir / C.FETCH_LOG_8K)
     need.new_kq = [a for a in log_table(guide.log_10kq)["Accession Number"].map(_acc) if a not in old_kq]
     k8 = log_table(guide.log_8k)
     need.new_8k = [a for a in k8["Accession Number"].map(_acc) if a not in old_8k] if len(k8) else []
-    used = {d.file_name for d in guide.required}
-    need.unused = sorted(n for n in saved if n not in used)
+    used = {id(f) for f in (saved_copy(filings, d) for d in guide.required) if f is not None}
+    need.unused = sorted(f.path.name for f in filings if id(f) not in used)
     return need
 
 

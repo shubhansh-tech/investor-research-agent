@@ -1,5 +1,6 @@
 """Browser test of the setup box on the "Setup & filings" tab (10 cases). Runs against the app with a stand-in
-for SEC EDGAR (see the session notes); point 1-3 of the owner's spec plus the four refinements and bad input."""
+for SEC EDGAR; point 1-3 of the owner's spec plus the four refinements and bad input.
+Start the app first:  streamlit run tests/fixtures/wrap_app_tsla.py --server.port 8598"""
 import time
 from playwright.sync_api import sync_playwright
 URL="http://localhost:8598/"; R=[]

@@ -412,8 +412,8 @@ def render_setup_tab() -> None:
     # in the order they were typed on Research.
     def unfinished(t: str) -> bool:
         g = st.session_state.get("setup_guides", {}).get(t) or (latest[t].setup_guide if t in latest else None)
-        req = [d.file_name for d in g.required] if g else None
-        return setup_status.ticker_status(root, t, C.today_et(), required_files=req).next_step is not None
+        return setup_status.ticker_status(root, t, C.today_et(), required=g.required if g else None
+                                          ).next_step is not None
 
     pending = [t for t, r in latest.items() if r.setup_guide is not None and unfinished(t)]
     added = st.session_state.setdefault("setup_added", [])
@@ -452,8 +452,8 @@ def render_setup_tab() -> None:
         # only a ticker that was already set up gets the "new filing" flow.
         onboarding_now = t in added or (r is not None and r.setup_guide is not None)
         g0 = guides.get(t) or (r.setup_guide if r is not None else None)
-        base = setup_status.ticker_status(root, t, C.today_et(), required_files=(
-            [d.file_name for d in g0.required] if (onboarding_now and g0) else None))
+        base = setup_status.ticker_status(root, t, C.today_et(), required=(
+            g0.required if (onboarding_now and g0) else None))
         is_set_up = base.next_step is None
         need = None
         if is_set_up and not test_mode:
@@ -474,7 +474,7 @@ def render_setup_tab() -> None:
             s = setup_status.ticker_status(root, t, C.today_et(), pending)
         else:
             s = setup_status.ticker_status(root, t, C.today_et(), r.new_filings if r else None,
-                                           required_files=[d.file_name for d in g.required] if g else None)
+                                           required=g.required if g else None)
         open_it = (t == focus) or (s.next_step is not None and focus is None) or bool(s.new_filings)
         headline = s.headline
         checked = st.session_state.get("setup_checked", {}).get(t)
@@ -544,9 +544,13 @@ def _guide(t: str):
 
 def filing_upload_slots(tdir: Path, t: str, g, docs) -> None:
     """One line per filing with its links; an upload slot for each one not yet saved (strict check)."""
+    from agent.filings import load_filings
+    have, _ = load_filings(tdir) if (tdir / "filings").is_dir() else ([], [])
     for d in docs:
-        saved = (tdir / "filings" / d.file_name).exists()
-        st.markdown(f"{'✅' if saved else '🔴'} **{d.form}** filed {d.filed} · {esc(d.role)}  \n"
+        copy = setup_status.saved_copy(have, d)       # matched by form and period, not by file name
+        saved = copy is not None
+        as_name = f" · saved as {copy.path.name}" if saved and copy.path.name != d.file_name else ""
+        st.markdown(f"{'✅' if saved else '🔴'} **{d.form}** filed {d.filed} · {esc(d.role)}{esc(as_name)}  \n"
                     f"[{d.file_name}]({d.doc_url}) · [EDGAR index page]({d.index_url})")
         if not saved:
             up = st.file_uploader(f"Upload {d.file_name}", type=["htm", "html"], key=f"up_{t}_{d.accession}")

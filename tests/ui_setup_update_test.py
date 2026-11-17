@@ -1,4 +1,4 @@
-"""Browser test of the "new filing needed" flow (8 cases): QUBT is set up, then EDGAR lists its Q3 10-Q.
+"""Browser test of the "new filing needed" flow (9 cases): QUBT is set up, then EDGAR lists its Q3 10-Q.
 The two September 10-Qs are test copies of QUBT's June 10-Qs with the period changed, made below.
 Start the app first:  streamlit run tests/fixtures/wrap_app_after_q3.py --server.port 8596"""
 import os, tempfile
@@ -34,13 +34,15 @@ with sync_playwright() as p:
     pg.get_by_role("button", name="Check EDGAR for new filings").nth(1).click() if pg.get_by_role("button", name="Check EDGAR for new filings").count()>1 else pg.get_by_role("button", name="Check EDGAR for new filings").first.click()
     settle(pg)
     h=qubt(pg); check("after the check: red, new filing needed (10-Q filed 2026-11-09)", h.startswith("🔴 QUBT") and "10-Q filed 2026-11-09" in h, h)
-    check("both 10-Qs listed as missing (this year and a year earlier)", pg.get_by_text("qubt-20260930.htm").first.is_visible() and pg.get_by_text("qubt-20250930.htm").first.is_visible())
+    check("both 10-Qs listed as missing (this year and a year earlier)", pg.get_by_text("ea099990101-10q_quantum.htm").first.is_visible() and pg.get_by_text("ea011081401-10q_quantum.htm").first.is_visible())
+    # The saved 10-K is called qubt-20251231.htm; EDGAR calls it ea002241701-10k_quantum.htm. Same filing: not asked for.
+    check("saved 10-K recognized by its contents, not its name (not asked for again)", pg.get_by_label("Upload ea002241701-10k_quantum.htm").count()==0 and pg.get_by_text("ea002241701-10k_quantum.htm").count()==0)
     check("logs: current beside updated, confirm held back until filings saved", pg.get_by_text(re.compile(r"Updated 10-K-10-Q_fetch_log.xlsx \(1 new row")).first.is_visible() and pg.get_by_text(re.compile("Save the filing\\(s\\) above first")).first.is_visible() and pg.get_by_role("button", name="Confirm and save the updated logs").count()==0)
     pg.screenshot(path=S+"/update_flow.png", full_page=True)
-    upload(pg, "Upload qubt-20260930.htm", f"{REPO}/data/QUBT/filings/qubt-20260630.htm")
+    upload(pg, "Upload ea099990101-10q_quantum.htm", f"{REPO}/data/QUBT/filings/qubt-20260630.htm")
     check("wrong period rejected", pg.get_by_text(re.compile(r"This is QUBT's 10-Q for the period ended 2026-06-30")).first.is_visible())
-    upload(pg, "Upload qubt-20260930.htm", S+"/qubt-20260930.htm")
-    upload(pg, "Upload qubt-20250930.htm", S+"/qubt-20250930.htm")
+    upload(pg, "Upload ea099990101-10q_quantum.htm", S+"/qubt-20260930.htm")
+    upload(pg, "Upload ea011081401-10q_quantum.htm", S+"/qubt-20250930.htm")
     check("both saved -> 'all saved', confirm button appears", pg.get_by_text(re.compile("all saved")).first.is_visible() and pg.get_by_role("button", name="Confirm and save the updated logs").count()==1)
     check("old 10-Qs reported as no longer used", pg.get_by_text(re.compile(r"No longer used .*qubt-20250630\.htm.*qubt-20260630\.htm")).first.is_visible())
     pg.get_by_role("button", name="Confirm and save the updated logs").click(); settle(pg)

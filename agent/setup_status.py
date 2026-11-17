@@ -27,6 +27,18 @@ DONE, ACTION, LOCKED, OPTIONAL = "done", "action", "locked", "optional"
 STEP_NAMES = {1: "Folder", 2: "Fetch logs", 3: "Filings", 4: "assumptions.md"}
 
 
+def saved_copy(filings: list, doc):
+    """The saved filing that IS this EDGAR document, or None.
+    Matched by what the file says on its own cover page (form and period), never by file name:
+    owners and earlier versions saved files under their own names (e.g. qubt-20251231.htm for a
+    10-K that EDGAR calls ea0230000-10k_quantum.htm)."""
+    for f in filings:
+        if (f.form or "").replace("/A", "") == doc.form and f.period_end and doc.period \
+                and abs((f.period_end - doc.period).days) <= 3:
+            return f
+    return None
+
+
 @dataclass
 class Step:
     n: int
@@ -67,9 +79,10 @@ def list_tickers(root: Path, extra: list[str] | None = None) -> list[str]:
 
 
 def ticker_status(root: Path, ticker: str, as_of: date, new_filings: list | None = None,
-                  required_files: list[str] | None = None) -> TickerStatus:
-    """required_files: the file names a setup guide listed (from EDGAR). When given, step 3 is done only
-    when every one of them is saved, not merely when some trailing-twelve-month set can be built."""
+                  required: list | None = None) -> TickerStatus:
+    """required: the filings a setup guide listed (onboarding.Doc, from EDGAR). When given, step 3 is done
+    only when every one of them is saved (whatever its file name), not merely when some
+    trailing-twelve-month set can be built."""
     st = TickerStatus(ticker, new_filings=list(new_filings or []))
     tdir = root / ticker
     if not tdir.is_dir():
@@ -92,11 +105,10 @@ def ticker_status(root: Path, ticker: str, as_of: date, new_filings: list | None
         st.steps.append(Step(3, LOCKED, "After step 2"))
     else:
         ttm = select_ttm(filings, as_of)
-        names = {f.path.name for f in filings}
-        still = [n for n in (required_files or []) if n not in names]
+        still = [d for d in (required or []) if saved_copy(filings, d) is None]
         if still:
-            st.steps.append(Step(3, ACTION, f"{len(required_files) - len(still)} of {len(required_files)} saved; "
-                                            "still needed: " + ", ".join(still)))
+            st.steps.append(Step(3, ACTION, f"{len(required) - len(still)} of {len(required)} saved; still needed: "
+                                            + ", ".join(f"{d.form} for the period ended {d.period}" for d in still)))
         elif ttm.problems or ttm.annual is None:
             st.steps.append(Step(3, ACTION, f"{len(filings)} saved; " + "; ".join(ttm.problems or ["latest 10-K missing"])))
         else:
