@@ -55,11 +55,8 @@ class SetupGuide:
 
 
 def _get(url: str, log: list | None):
-    if log is not None:
-        log.append(url)
-    req = urllib.request.Request(url, headers={"User-Agent": C.SEC_USER_AGENT, "Accept-Encoding": "identity"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        return json.loads(r.read().decode())
+    from .sec_http import get_json
+    return get_json(url, log)
 
 
 def _d(s: str) -> date | None:

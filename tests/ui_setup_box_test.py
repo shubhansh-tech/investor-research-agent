@@ -11,7 +11,9 @@ def research(pg, tickers, prices):
     pg.get_by_role("tab", name="Research").click(); time.sleep(0.5)
     t=pg.get_by_label("Tickers (1 to 5, comma-separated)"); t.click(); t.press("Control+A"); t.type(tickers); pg.keyboard.press("Tab"); time.sleep(1.2)
     for tk, pr in prices: pg.get_by_label(f"{tk} price ($)").fill(pr); pg.keyboard.press("Tab"); time.sleep(1)
-    pg.get_by_role("button", name="Run research").click(); pg.get_by_text("Needs information").first.wait_for(timeout=90000) if any(x in tickers.upper() for x in ("TSLA","NVDA")) else time.sleep(8)
+    pg.get_by_role("button", name="Run research").click(); time.sleep(1.5)
+    end=time.time()+90      # wait until the whole run has finished (SEC retries can take several seconds)
+    while time.time()<end and pg.locator('[data-testid="stStatusWidget"]').count(): time.sleep(0.3)
     time.sleep(1)
 import re
 def settle(pg):

@@ -113,13 +113,10 @@ def read_filing_list(path: Path) -> list[FilingRow]:
 # ---------------------------------------------------------------- EDGAR list
 def edgar_list_live(ticker: str, log=None) -> list[FilingRow]:
     """EDGAR's current filing list from SEC's free JSON service (daily use only)."""
-    headers = {"User-Agent": C.SEC_USER_AGENT, "Accept-Encoding": "identity"}
+    from .sec_http import get_json
 
     def get(url):
-        if log is not None:
-            log.append(url)
-        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=20) as r:
-            return json.loads(r.read().decode())
+        return get_json(url, log)
 
     tickers = get("https://www.sec.gov/files/company_tickers.json")
     cik = next((v["cik_str"] for v in tickers.values() if v["ticker"].upper() == ticker.upper()), None)

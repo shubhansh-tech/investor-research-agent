@@ -235,7 +235,7 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
         edgar = edgar_list_snapshot(tdir) if test_mode else edgar_list_live(ticker, row.live_calls)
         tr(f"EDGAR filing list: {len(edgar)} filings ({'saved TEST snapshot' if test_mode else 'live sec.gov'})")
     except Exception as e:  # noqa: BLE001
-        row.missing.append(f"EDGAR lookup failed ({e}); rerun when sec.gov is reachable")
+        row.missing.append(f"SEC EDGAR lookup failed: {e}")
         return finish()
     if test_mode and not edgar:
         row.missing.append(f"{ticker}/{C.SNAPSHOT_DIR}/ has no filing list files")

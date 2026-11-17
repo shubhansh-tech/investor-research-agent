@@ -21,6 +21,15 @@ import pandas as pd
 import streamlit as st
 import yaml
 
+# ---- secrets -> environment, BEFORE any agent module is imported: agent.config reads them at import
+# time, so copying them later meant SEC_USER_AGENT and ANTHROPIC_MODEL from Secrets were never used.
+for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "SEC_USER_AGENT", "APP_PASSCODE", "MAX_MODEL_CALLS_PER_SESSION"):
+    try:
+        if k in st.secrets and not os.getenv(k):
+            os.environ[k] = str(st.secrets[k])
+    except Exception:  # noqa: BLE001  (no secrets file locally is fine)
+        pass
+
 from agent import config as C
 from agent import decisions as decisions_mod
 from agent import onboarding, setup_actions, setup_bundle, setup_status, storage
@@ -34,13 +43,6 @@ from evals.scenarios import build as build_scenario
 st.set_page_config(page_title="Pre-market Research Agent", page_icon="📈", layout="wide",
                    initial_sidebar_state="expanded")   # always open on load, including after the app wakes from sleep
 
-# ---- secrets -> environment (never hard-coded)
-for k in ("ANTHROPIC_API_KEY", "ANTHROPIC_MODEL", "SEC_USER_AGENT", "APP_PASSCODE", "MAX_MODEL_CALLS_PER_SESSION"):
-    try:
-        if k in st.secrets and not os.getenv(k):
-            os.environ[k] = str(st.secrets[k])
-    except Exception:  # noqa: BLE001  (no secrets file locally is fine)
-        pass
 
 SPEC = yaml.safe_load((C.REPO_ROOT / "evals" / "cases.yaml").read_text())
 TEST_AS_OF = date.fromisoformat(SPEC["as_of"])
