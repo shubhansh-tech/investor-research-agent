@@ -55,7 +55,7 @@ cases:
     name: EDGAR snapshot matches fetch logs
     ticker: CB
     ops: [news: []]
-    expect: {status: READY, missing_not_contains: ["download new filing"]}
+    expect: {status: READY, missing_not_contains: ["new filing"]}
 
   - id: E-08
     name: Prior-year 10-Q missing
@@ -85,7 +85,7 @@ cases:
     name: New 10-Q on EDGAR not in the fetch log
     ticker: CB
     ops: [news: [], drop_latest_q_from_log]
-    expect: {status: NEEDS INFORMATION, metrics: absent, missing_contains: ["download new filing 10-Q"]}
+    expect: {status: NEEDS INFORMATION, metrics: absent, missing_contains: ["new filing 10-Q"]}
 
   - id: E-13
     name: Test mode, EDGAR snapshot folder missing

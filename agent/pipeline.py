@@ -243,9 +243,20 @@ def run_research(ticker: str, price: float | None, data_root: Path | str = C.DEF
     new = find_new_filings(edgar, log_kq, log_8k, as_of)
     if new.must_download:
         row.new_filings = list(new.must_download)
+        item_names = {"2.02": "Item 2.02, earnings results", "4.02": "Item 4.02, restatement"}
         for r in new.must_download:
-            row.missing.append(f"download new filing {r.form} filed {r.filing_date} (accession {r.accession}) "
-                               f"and add it to your fetch log: {r.url}")
+            if r.form.upper().startswith("8-K"):
+                what = ", ".join(item_names[i] for i in sorted(r.items & C.REQUIRED_8K_ITEMS))
+                row.missing.append(f"New filing {r.form} filed {r.filing_date} ({what}) is on SEC EDGAR but not in "
+                                   f"your 8-K fetch log (only the log needs updating; no file to save): {r.url}")
+            else:
+                period = f", period ended {r.report_date}" if r.report_date else ""
+                row.missing.append(f"New filing {r.form} filed {r.filing_date}{period} is on SEC EDGAR but not in "
+                                   f"your saved filings: {r.url}")
+        if not test_mode:
+            row.missing.append(f"Nothing was recalculated. Open {ticker} on the Setup & filings tab (button below): "
+                               "it lists exactly which filings to save, with links, and updates both fetch logs "
+                               "for you. A new quarterly report usually also needs the same quarter a year earlier.")
         tr("New filing on EDGAR not yet saved; nothing recalculated")
         return finish()
     row.checks.append("No required filing on EDGAR is missing from the fetch logs (accession-number match)")
