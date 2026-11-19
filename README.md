@@ -7,8 +7,9 @@ writes a cited brief (at most 200 words, plus up to 5 news items in at most 200 
 approves, rejects, asks or cancels. **It produces research only: no trade, order,
 brokerage or messaging tool exists in this codebase.**
 
-Built for the Product Faculty Agentic AI PM capstone (C11). Author and first user:
-Shubhansh Karnick.
+Started as my capstone for Product Faculty’s Agentic AI PM program (Oct 2026), which asked for a prototype. I took it further, close to a working MVP (minimum viable product: the smallest version real users can rely on), and I’m still improving it. 
+
+Author and first user: Shubhansh Karnick.
 
 ## Design in one line
 The AI reads and writes; plain code checks and counts. The model chooses *which*
